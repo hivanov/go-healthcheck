@@ -8,9 +8,9 @@ import (
 )
 
 // waitForStatus helper waits for the checker to report a specific status.
-func waitForStatus(t *testing.T, checker core.Component, expectedStatus core.StatusEnum, timeout time.Duration) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+func waitForStatus(tb testing.TB, checker core.Component, expectedStatus core.StatusEnum, timeout time.Duration) {
+	tb.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	statusChangeChan := checker.StatusChange()
@@ -23,7 +23,7 @@ func waitForStatus(t *testing.T, checker core.Component, expectedStatus core.Sta
 	for {
 		select {
 		case <-ctx.Done():
-			t.Fatalf("Timed out waiting for status '%s'. Current status: '%s', Output: '%s'", expectedStatus, checker.Status().Status, checker.Status().Output)
+			tb.Fatalf("Timed out waiting for status '%s'. Current status: '%s', Output: '%s'", expectedStatus, checker.Status().Status, checker.Status().Output)
 		case newStatus := <-statusChangeChan:
 			if newStatus.Status == expectedStatus {
 				return

@@ -13,37 +13,41 @@ import (
 
 // setupPostgresContainer starts a PostgreSQL container and returns its connection string.
 // It also returns a cleanup function to stop the container.
-func setupPostgresContainer(t *testing.T, ctx context.Context) (testcontainers.Container, string, func()) {
-	pgContainer, err := postgres.Run(t.Context(), // Use t.Context() here
+func setupPostgresContainer(tb testing.TB, ctx context.Context) (testcontainers.Container, string, func()) {
+	// Create a context with a timeout for container startup
+	startupCtx, startupCancel := context.WithTimeout(ctx, 2*time.Minute) // Increased timeout for container startup
+	defer startupCancel()
+
+	pgContainer, err := postgres.Run(startupCtx, // Use startupCtx
 		"postgres:15-alpine",
 		postgres.WithDatabase("testdb"),
-		postgres.WithUsername("testuser"),
+		postgres.WithUsername("testuser"),		
 		postgres.WithPassword("testpass"),
 		postgres.BasicWaitStrategies(),
 	)
 	if err != nil {
-		t.Fatalf("Failed to start PostgreSQL container: %v", err)
+		tb.Fatalf("Failed to start PostgreSQL container: %v", err) // Use tb
 	}
 
-	assert.NotNil(t, pgContainer, "PostgreSQL container is nil")
+	assert.NotNil(tb, pgContainer, "PostgreSQL container is nil") // Use tb
 
-	connStr, err := pgContainer.ConnectionString(t.Context(), "sslmode=disable") // Use t.Context() here
+	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable") // Use passed ctx
 	if err != nil && pgContainer != nil {
-		_ = pgContainer.Terminate(t.Context()) // Use t.Context() here
-		t.Fatalf("Failed to get connection string: %v", err)
+		_ = pgContainer.Terminate(ctx) // Use passed ctx
+		tb.Fatalf("Failed to get connection string: %v", err) // Use tb
 	}
 
 	return pgContainer, connStr, func() {
-		if err := pgContainer.Terminate(t.Context()); err != nil { // Use t.Context() here
-			t.Logf("Failed to terminate PostgreSQL container: %v", err)
+		if err := pgContainer.Terminate(ctx); err != nil { // Use passed ctx
+			tb.Logf("Failed to terminate PostgreSQL container: %v", err) // Use tb
 		}
 	}
 }
 
 // waitForStatus helper waits for the checker to report a specific status.
-func waitForStatus(t *testing.T, checker core.Component, expectedStatus core.StatusEnum, timeout time.Duration) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), timeout) // Use t.Context() here
+func waitForStatus(tb testing.TB, checker core.Component, expectedStatus core.StatusEnum, timeout time.Duration) {
+	tb.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout) // Use context.Background()
 	defer cancel()
 
 	statusChangeChan := checker.StatusChange()
@@ -57,7 +61,7 @@ func waitForStatus(t *testing.T, checker core.Component, expectedStatus core.Sta
 	for {
 		select {
 		case <-ctx.Done():
-			t.Fatalf("Timed out waiting for status '%s'. Current status: '%s', Output: '%s'", expectedStatus, checker.Status().Status, checker.Status().Output)
+			tb.Fatalf("Timed out waiting for status '%s'. Current status: '%s', Output: '%s'", expectedStatus, checker.Status().Status, checker.Status().Output) // Use tb
 		case newStatus := <-statusChangeChan:
 			if newStatus.Status == expectedStatus {
 				return

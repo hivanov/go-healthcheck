@@ -35,34 +35,40 @@ func (m *mockMongoConnection) Disconnect(ctx context.Context) error {
 }
 
 // setupMongoContainer starts a MongoDB container and returns its connection string.
-func setupMongoContainer(t *testing.T, ctx context.Context) (testcontainers.Container, string, func()) {
+func setupMongoContainer(tb testing.TB, ctx context.Context) (testcontainers.Container, string, func()) {
+	// Create a context with a timeout for container startup
+	startupCtx, startupCancel := context.WithTimeout(ctx, 2*time.Minute) // Increased timeout for container startup
+	defer startupCancel()
+
 	req := testcontainers.ContainerRequest{
 		Image:        "mongo:6",
 		ExposedPorts: []string{"27017/tcp"},
 		WaitingFor:   wait.ForListeningPort("27017/tcp"),
 	}
-	mongoContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{ // Use t.Context() here
+	mongoContainer, err := testcontainers.GenericContainer(startupCtx, testcontainers.GenericContainerRequest{ // Use startupCtx
 		ContainerRequest: req,
 		Started:          true,
 	})
 	if err != nil {
-		t.Fatalf("Failed to start MongoDB container: %v", err)
+		tb.Fatalf("Failed to start MongoDB container: %v", err) // Use tb
 	}
 
-	host, err := mongoContainer.Host(ctx) // Use t.Context() here
+	assert.NotNil(tb, mongoContainer, "MongoDB container is nil") // Use tb
+
+	host, err := mongoContainer.Host(ctx) // Use passed ctx
 	if err != nil {
-		t.Fatalf("Failed to get container host: %v", err)
+		tb.Fatalf("Failed to get container host: %v", err) // Use tb
 	}
-	port, err := mongoContainer.MappedPort(ctx, "27017") // Use t.Context() here
+	port, err := mongoContainer.MappedPort(ctx, "27017") // Use passed ctx
 	if err != nil {
-		t.Fatalf("Failed to get container port: %v", err)
+		tb.Fatalf("Failed to get container port: %v", err) // Use tb
 	}
 
 	connStr := fmt.Sprintf("mongodb://%s:%s", host, port.Port())
 
 	return mongoContainer, connStr, func() {
-		if err := mongoContainer.Terminate(ctx); err != nil { // Use t.Context() here
-			t.Logf("Failed to terminate MongoDB container: %v", err)
+		if err := mongoContainer.Terminate(ctx); err != nil { // Use passed ctx
+			tb.Logf("Failed to terminate MongoDB container: %v", err) // Use tb
 		}
 	}
 }
