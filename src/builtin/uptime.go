@@ -1,0 +1,134 @@
+package builtin
+
+import (
+	"context"
+	"fmt"
+	"healthcheck/core"
+	"sync"
+	"time"
+)
+
+type uptime struct {
+	lastStatus     core.ComponentStatus
+	observerChange chan core.ComponentStatus
+	descriptor     core.Descriptor
+	ctx            context.Context
+	cancelFunc     context.CancelFunc
+	mutex          sync.RWMutex
+}
+
+// Ensure uptime implements the Component interface
+var _ core.Component = (*uptime)(nil)
+
+// NewUptimeComponent creates a new component that tracks service uptime.
+func NewUptimeComponent() core.Component {
+	ctx, cancelFunc := context.WithCancel(context.Background())
+
+	u := &uptime{
+		observerChange: make(chan core.ComponentStatus, 1),
+		descriptor: core.Descriptor{
+			ComponentID:   "uptime",
+			ComponentType: "system",
+			Description:   "Tracks the uptime of the service.",
+		},
+		ctx:        ctx,
+		cancelFunc: cancelFunc,
+	}
+
+	startTime := time.Now()
+
+	go func() {
+		defer close(u.observerChange)
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
+		// Send initial status immediately
+		u.updateStatus(startTime)
+
+		for {
+			select {
+			case <-u.ctx.Done():
+				return
+			case <-ticker.C:
+				u.updateStatus(startTime)
+			}
+		}
+	}()
+
+	return u
+}
+
+// updateStatus calculates the current uptime, sets it as the status, and broadcasts it.
+func (u *uptime) updateStatus(startTime time.Time) {
+	uptimeDuration := time.Since(startTime)
+	newStatus := core.ComponentStatus{
+		Status:        core.StatusPass,
+		ObservedValue: uptimeDuration.Seconds(),
+		ObservedUnit:  "s",
+		Time:          time.Now(),
+		Output:        fmt.Sprintf("Service has been running for %s", uptimeDuration.Round(time.Second).String()),
+	}
+
+	u.mutex.Lock()
+	u.lastStatus = newStatus
+	u.mutex.Unlock()
+
+	// Broadcast the change
+	select {
+	case <-u.observerChange: // Drain old status if buffer is full
+	default:
+	}
+	u.observerChange <- newStatus
+}
+
+func (u *uptime) Close() error {
+	u.cancelFunc()
+	return nil
+}
+
+// ChangeStatus is a no-op for Uptime component as its status is internally managed.
+func (u *uptime) ChangeStatus(status core.ComponentStatus) {}
+
+// Disable is a no-op for Uptime component as its status is always 'pass'.
+func (u *uptime) Disable() {}
+
+// Enable is a no-op for Uptime component as its status is always 'pass'.
+func (u *uptime) Enable() {}
+
+func (u *uptime) Status() core.ComponentStatus {
+	u.mutex.RLock()
+	defer u.mutex.RUnlock()
+	return u.lastStatus
+}
+
+func (u *uptime) Descriptor() core.Descriptor {
+	return u.descriptor
+}
+
+func (u *uptime) StatusChange() <-chan core.ComponentStatus {
+	return u.observerChange
+}
+
+func (u *uptime) Health() core.ComponentHealth {
+	u.mutex.RLock()
+	status := u.lastStatus
+	u.mutex.RUnlock()
+
+	descriptor := u.Descriptor()
+	return core.ComponentHealth{
+		Status:            status.Status,
+		Version:           descriptor.Version,
+		ReleaseID:         descriptor.ReleaseID,
+		Notes:             descriptor.Notes,
+		Output:            status.Output,
+		Links:             descriptor.Links,
+		ServiceID:         descriptor.ServiceID,
+		Description:       descriptor.Description,
+		ComponentID:       descriptor.ComponentID,
+		ComponentType:     descriptor.ComponentType,
+		ObservedValue:     status.ObservedValue,
+		ObservedUnit:      status.ObservedUnit,
+		AffectedEndpoints: status.AffectedEndpoints,
+		Time:              status.Time,
+	}
+}
