@@ -38,6 +38,49 @@ interactions and code modifications.
     in addition to `component.go`?"). This avoids misinterpreting implicit intentions.
 *   Do not include "src/" in the module names.
 
+
+# General Rules
+1. Always base your implementation on the best way to do the healthcheck:
+- Issue at least one search in Google to find out ways to do the health check,
+- Evaluate the methods based on impact analysis -- those with least privileges AND no impact on other user data come first always.
+- Once a method is selected, make sure to implement it in the library.
+2. Do always verify your work by running tests.
+3. Performance tests should be run explicitly to ensure correct behaviour. Make sure to implement them in such a way that using "go test" or "go bench" is enough.
+4. Do not leave code with warnings, errors and hints on. Make sure to fix all compiler suggestions.
+
+# Error handling
+- Use `errors.Join()` instead of wrapping errors in `Errorf()`.
+
+# Testing Rules
+
+Always use `assert.*` and `require.*` instead of `if X {t.Fail()}` or equivalents.
+
+# Factory Function Rules
+Think very carefully of how you design your interfaces, especially the New* factory functions. Your factory functions:
+- should only create interfaces that are used for testing (mocking), or 
+- the official way to create a client (like, accepting a connection string, for example), or 
+- accept a user-provided client instances, where it makes sense.
+
+The general rule is to always search for examples and provide the minimum needed footprint to allow for the majority (90+%) of the cases.
+
+Good examples include:
+
+```go
+import "healthcheck/core"
+
+func NewPostgresHealthcheck(connectionString string) (core.Component, error) { /* implementation goes here */ }
+``` 
+
+or
+
+```go
+import (
+    "github.com/hashicorp/vault/api"
+    "healthcheck/core"
+)
+func NewVaultHealthcheck(client *api.Client)
+```
+
 ## Specific Learnings from this Session
 
 *   **`write_file` with `insert_before`/`insert_after_line` can be unreliable.** Avoid using it for anything

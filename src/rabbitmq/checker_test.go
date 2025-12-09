@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -59,7 +58,7 @@ func TestRabbitMQHealthCheck_Pass(t *testing.T) {
 	checker := NewRabbitMQChecker(descriptor, 1*time.Second, amqpURL)
 	defer func() {
 		if err := checker.Close(); err != nil {
-			log.Printf("Error closing checker: %v", err)
+			require.NoError(t, err)
 		}
 	}()
 
@@ -89,7 +88,7 @@ func TestRabbitMQHealthCheck_Fail(t *testing.T) {
 	checker := NewRabbitMQChecker(descriptor, 1*time.Second, badAmqpURL)
 	defer func() {
 		if err := checker.Close(); err != nil {
-			log.Printf("Error closing checker: %v", err)
+			require.NoError(t, err)
 		}
 	}()
 
@@ -155,7 +154,7 @@ func TestRabbitMQHealthCheck_ChangeStatus(t *testing.T) {
 	checker := NewRabbitMQChecker(descriptor, 1*time.Minute, amqpURL) // Long interval to prevent auto-updates
 	defer func() {
 		if err := checker.Close(); err != nil {
-			log.Printf("Error closing checker: %v", err)
+			require.NoError(t, err)
 		}
 	}()
 
@@ -193,7 +192,7 @@ func TestRabbitMQHealthCheck_DisableEnable(t *testing.T) {
 	checker := NewRabbitMQChecker(descriptor, 1*time.Second, amqpURL)
 	defer func() {
 		if err := checker.Close(); err != nil {
-			log.Printf("Error closing checker: %v", err)
+			require.NoError(t, err)
 		}
 	}()
 
@@ -274,7 +273,7 @@ func TestRabbitMQHealthCheck_StatusChangeChannel(t *testing.T) {
 	checker := NewRabbitMQChecker(descriptor, 1*time.Second, amqpURL)
 	defer func() {
 		if err := checker.Close(); err != nil {
-			log.Printf("Error closing checker: %v", err)
+			require.NoError(t, err)
 		}
 	}()
 
@@ -306,7 +305,6 @@ func TestRabbitMQHealthCheck_StatusChangeChannel(t *testing.T) {
 		// No further action needed here.
 	}
 
-
 	// Test ChangeStatus causing a channel update
 	newStatus := core.ComponentStatus{Status: core.StatusFail}
 	checker.ChangeStatus(newStatus)
@@ -316,4 +314,109 @@ func TestRabbitMQHealthCheck_StatusChangeChannel(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Timeout waiting for FAIL status from channel")
 	}
+}
+
+// TestRabbitMQHealthCheck_Descriptor verifies the Descriptor method.
+func TestRabbitMQHealthCheck_Descriptor(t *testing.T) {
+	expectedDescriptor := core.Descriptor{
+		ComponentID:   "rabbitmq-test-descriptor",
+		ComponentType: "rabbitmq",
+		Description:   "RabbitMQ health check descriptor test",
+	}
+
+	checker := &rabbitMQChecker{
+		descriptor: expectedDescriptor,
+	}
+
+	actualDescriptor := checker.Descriptor()
+	assert.Equal(t, expectedDescriptor, actualDescriptor, "Expected descriptor to match")
+}
+
+// TestRabbitMQHealthCheck_ConnectionCloseError verifies that an error during connection close is logged.
+func TestRabbitMQHealthCheck_ConnectionCloseError(t *testing.T) {
+	mockConn := newMockAMQPConnection()
+	mockConn.SetCloseError(fmt.Errorf("mock connection close error"))
+
+	descriptor := core.Descriptor{ComponentID: "test-close-conn-error", ComponentType: "rabbitmq"}
+	checker := newRabbitMQCheckerInternal(descriptor, 10*time.Millisecond, mockConn) // Short interval for quick check
+	// Removed defer checker.Close() to prevent double close of quit channel
+
+	// Give it some time to run a check and then close
+	time.Sleep(50 * time.Millisecond)
+	err := checker.Close()
+	assert.Error(t, err) // Checker.Close should return error from underlying connection close
+	assert.Contains(t, err.Error(), "mock connection close error")
+}
+
+// TestRabbitMQHealthCheck_ChannelOpenError verifies that the health check fails if opening a channel fails.
+func TestRabbitMQHealthCheck_ChannelOpenError(t *testing.T) {
+	mockConn := newMockAMQPConnection()
+	mockConn.SetChannelError(fmt.Errorf("mock channel open error"))
+
+	descriptor := core.Descriptor{ComponentID: "test-channel-open-error", ComponentType: "rabbitmq"}
+	// Use NewRabbitMQCheckerWithOpenAMQPFunc to inject our mock connection.
+	// We need a function that returns a *real* checker, but with our mock.
+	openFunc := func(url string) (amqpConnection, error) {
+		return mockConn, nil
+	}
+	checker := NewRabbitMQCheckerWithOpenAMQPFunc(descriptor, 10*time.Millisecond, "amqp://localhost", openFunc)
+	defer func() {
+		_ = checker.Close()
+	}()
+
+	time.Sleep(50 * time.Millisecond) // Give it time to perform a check
+
+	status := checker.Status()
+	assert.Equal(t, core.StatusFail, status.Status)
+	assert.Contains(t, status.Output, "Failed to open RabbitMQ channel: mock channel open error")
+}
+
+// TestRabbitMQHealthCheck_ChannelCloseError verifies that an error during channel close is logged.
+func TestRabbitMQHealthCheck_ChannelCloseError(t *testing.T) {
+	mockChannel := newMockAMQPChannel()
+	mockChannel.SetCloseError(fmt.Errorf("mock channel close error"))
+
+	mockConn := newMockAMQPConnection()
+	mockConn.mockChannel = mockChannel // Inject mockChannel into mockConn
+
+	descriptor := core.Descriptor{ComponentID: "test-channel-close-error", ComponentType: "rabbitmq"}
+	openFunc := func(url string) (amqpConnection, error) {
+		return mockConn, nil
+	}
+	checker := NewRabbitMQCheckerWithOpenAMQPFunc(descriptor, 10*time.Millisecond, "amqp://localhost", openFunc)
+	defer func() {
+		_ = checker.Close()
+	}()
+
+	time.Sleep(50 * time.Millisecond) // Give it time to perform a check
+
+	// The error from channel.Close() is logged, not returned by performHealthCheck,
+	// so the checker's status should still be PASS if publish was successful.
+	status := checker.Status()
+	assert.Equal(t, core.StatusPass, status.Status)
+	assert.Contains(t, status.Output, "RabbitMQ is healthy")
+}
+
+// TestRabbitMQHealthCheck_PublishError verifies that the health check fails if publishing a message fails.
+func TestRabbitMQHealthCheck_PublishError(t *testing.T) {
+	mockChannel := newMockAMQPChannel()
+	mockChannel.SetPublishError(fmt.Errorf("mock publish error"))
+
+	mockConn := newMockAMQPConnection()
+	mockConn.mockChannel = mockChannel // Inject mockChannel into mockConn
+
+	descriptor := core.Descriptor{ComponentID: "test-publish-error", ComponentType: "rabbitmq"}
+	openFunc := func(url string) (amqpConnection, error) {
+		return mockConn, nil
+	}
+	checker := NewRabbitMQCheckerWithOpenAMQPFunc(descriptor, 10*time.Millisecond, "amqp://localhost", openFunc)
+	defer func() {
+		_ = checker.Close()
+	}()
+
+	time.Sleep(50 * time.Millisecond) // Give it time to perform a check
+
+	status := checker.Status()
+	assert.Equal(t, core.StatusFail, status.Status)
+	assert.Contains(t, status.Output, "Failed to publish RabbitMQ test message: mock publish error")
 }

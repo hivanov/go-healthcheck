@@ -4,6 +4,7 @@ import (
 	"context"
 	"healthcheck/core"
 	"sync"
+	"sync/atomic" // Import atomic package
 	"testing"
 	"time"
 
@@ -47,7 +48,7 @@ func TestMariaDBChecker_HealthLoad(t *testing.T) {
 		}
 	}()
 
-	totalCalls := 0
+	var totalCalls int64 // Change to int64 for atomic operations
 	var wg sync.WaitGroup
 	wg.Add(testConcurrency)
 
@@ -58,7 +59,7 @@ func TestMariaDBChecker_HealthLoad(t *testing.T) {
 			defer wg.Done()
 			for time.Since(startTime) < testDuration {
 				_ = checker.Health()
-				totalCalls++
+				atomic.AddInt64(&totalCalls, 1) // Use atomic increment
 			}
 		}()
 	}
@@ -66,9 +67,9 @@ func TestMariaDBChecker_HealthLoad(t *testing.T) {
 	wg.Wait()
 
 	duration := time.Since(startTime)
-	actualCallsPerSecond := float64(totalCalls) / duration.Seconds()
+	actualCallsPerSecond := float64(atomic.LoadInt64(&totalCalls)) / duration.Seconds() // Use atomic load
 
-	t.Logf("Health() method handled %d calls in %v", totalCalls, duration)
+	t.Logf("Health() method handled %d calls in %v", atomic.LoadInt64(&totalCalls), duration)
 	t.Logf("Actual calls per second: %.2f", actualCallsPerSecond)
 
 	assert.GreaterOrEqual(t, actualCallsPerSecond, float64(minCallsPerSecond), "Health() method should handle at least %d calls per second", minCallsPerSecond)
@@ -107,7 +108,7 @@ func TestMariaDBChecker_HealthLoad_WithRealDB(t *testing.T) {
 		t.Log("MariaDB container stopped during load test.")
 	}()
 
-	totalCalls := 0
+	var totalCalls int64 // Change to int64 for atomic operations
 	var wg sync.WaitGroup
 	wg.Add(testConcurrency)
 
@@ -118,7 +119,7 @@ func TestMariaDBChecker_HealthLoad_WithRealDB(t *testing.T) {
 			defer wg.Done()
 			for time.Since(startTime) < testDuration {
 				_ = checker.Health()
-				totalCalls++
+				atomic.AddInt64(&totalCalls, 1) // Use atomic increment
 			}
 		}()
 	}
@@ -127,9 +128,9 @@ func TestMariaDBChecker_HealthLoad_WithRealDB(t *testing.T) {
 	stopWg.Wait() // Ensure container stop goroutine finishes
 
 	duration := time.Since(startTime)
-	actualCallsPerSecond := float64(totalCalls) / duration.Seconds()
+	actualCallsPerSecond := float64(atomic.LoadInt64(&totalCalls)) / duration.Seconds() // Use atomic load
 
-	t.Logf("Health() method (with real DB) handled %d calls in %v", totalCalls, duration)
+	t.Logf("Health() method (with real DB) handled %d calls in %v", atomic.LoadInt64(&totalCalls), duration)
 	t.Logf("Actual calls per second (with real DB): %.2f", actualCallsPerSecond)
 
 	assert.GreaterOrEqual(t, actualCallsPerSecond, float64(minCallsPerSecond), "Health() method should handle at least %d calls per second even when DB goes down", minCallsPerSecond)

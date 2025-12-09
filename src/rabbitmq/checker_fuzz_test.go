@@ -1,9 +1,9 @@
 package rabbitmq
 
 import (
-
 	"healthcheck/core"
 	"net/url"
+	"sync" // Import sync package
 	"testing"
 	"time"
 
@@ -49,6 +49,7 @@ type MockAMQPConnection struct {
 	failDial      bool
 	failChannel   bool
 	connectionURL string
+	mu            sync.Mutex // Mutex to protect 'closed'
 	closed        bool
 }
 
@@ -60,11 +61,15 @@ func (m *MockAMQPConnection) Channel() (amqpChannel, error) { // Corrected retur
 }
 
 func (m *MockAMQPConnection) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.closed = true
 	return nil
 }
 
 func (m *MockAMQPConnection) IsClosed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.closed
 }
 
