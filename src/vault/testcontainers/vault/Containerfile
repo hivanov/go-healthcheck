@@ -1,0 +1,23 @@
+FROM hashicorp/vault
+
+RUN apk add --no-cache curl base64 openssl
+
+ENV VAULT_DEV_ROOT_TOKEN_ID='root'
+ENV VAULT_ADDR='http://127.0.0.1:8200'
+ENV VAULT_TOKEN='root'
+
+EXPOSE 8200
+COPY vault-entrypoint.sh /vault-entrypoint.sh
+COPY vault-init.sh /
+COPY dev-policy.hcl /dev-policy.hcl
+COPY solace-client.pem /solace-client.pem
+COPY solace-client.key /solace-client.key
+
+# Encrypt the private key and combine with the certificate
+RUN openssl rsa -in /solace-client.key -des3 -out /solace-client-encrypted.key -passout pass:password && \
+    cat /solace-client.pem /solace-client-encrypted.key > /dev-cert.pem && \
+    rm /solace-client.pem /solace-client.key /solace-client-encrypted.key
+
+RUN chmod 755 /vault-init.sh /vault-entrypoint.sh
+
+ENTRYPOINT [ "/vault-entrypoint.sh" ]

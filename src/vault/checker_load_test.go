@@ -1,0 +1,79 @@
+package vault_test
+
+import (
+	"context"
+	"log"
+	"testing"
+	"time"
+
+	"github.com/hashicorp/vault/api"
+	"github.com/stretchr/testify/assert"
+
+	"healthcheck/core"
+	checker "healthcheck/vault"
+	// test_utils_test is in the same package, so no import needed.
+)
+
+func BenchmarkVaultChecker_HealthThroughput(b *testing.B) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Use the shared setup function
+	vaultC, vaultAddr, _, err := SetupVaultContainerForTests(ctx)
+	if err != nil {
+		b.Fatalf("Failed to set up load test Vault container: %v", err)
+	}
+	defer func() {
+		if err := vaultC.Terminate(ctx); err != nil {
+			log.Printf("Failed to terminate load test Vault container: %v", err)
+		}
+	}()
+
+	// The Vault API client is already configured by SetupVaultContainerForTests
+	// Ensure the config is passed to the checker
+	cfg := api.DefaultConfig()
+	cfg.Address = vaultAddr
+	cfg.HttpClient.Timeout = 5 * time.Second // Shorter timeout for benchmark
+
+	// This is the actual checker being tested
+	descriptor := core.Descriptor{
+		ComponentID:   "load-test-vault",
+		ComponentType: "vault",
+		Description:   "Load test for Vault checker",
+	}
+	// Use checker.NewVaultChecker (public constructor)
+	testChecker := checker.NewVaultChecker(descriptor, 100*time.Millisecond, cfg)
+	assert.NotNil(b, testChecker)
+	defer func() {
+		if err := testChecker.Close(); err != nil {
+			log.Printf("Error closing load test checker: %v", err)
+		}
+	}()
+
+	// Ensure the checker is healthy before starting the benchmark
+	time.Sleep(2 * time.Second) // Give it time for initial checks
+	if testChecker.Status().Status != core.StatusPass {
+		b.Fatalf("Vault checker is not healthy before benchmark: %s", testChecker.Status().Output)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	// Simulate concurrent calls to Health()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			health := testChecker.Health()
+			if health.Status != core.StatusPass {
+				b.Errorf("Health check failed during load test: %s", health.Output)
+			}
+		}
+	})
+
+	// After benchmark, verify throughput
+	throughput := float64(b.N) / b.Elapsed().Seconds()
+	if throughput < 200 {
+		b.Errorf("Health() throughput too low: %.2f calls/sec, expected >= 200 calls/sec", throughput)
+	} else {
+		log.Printf("Health() throughput: %.2f calls/sec", throughput)
+	}
+}

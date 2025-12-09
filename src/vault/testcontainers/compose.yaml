@@ -1,0 +1,20 @@
+services:
+  stackit-vault:
+    hostname: stackit-vault
+    build:
+      context: ./vault
+      dockerfile: ./Dockerfile
+    container_name: "stackit-vault"
+    ports:
+      - "8200:8200"
+    healthcheck:
+      test: "curl --silent --fail http://127.0.0.1:8200/v1/sys/health"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+    networks:
+      - glob
+networks:
+  glob:
+    driver: bridge
