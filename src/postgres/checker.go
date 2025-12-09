@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"healthcheck/core"
+	"log"
 	"sync"
 	"time"
 
@@ -86,7 +87,7 @@ func NewPostgresCheckerWithOpenDBFunc(descriptor core.Descriptor, checkInterval 
 	dbConn, err := openDB("postgres", connectionString) // Use the provided OpenDBFunc
 	if err != nil {
 		dummyChecker := &postgresChecker{
-			descriptor:    descriptor,
+			descriptor: descriptor,
 			currentStatus: core.ComponentStatus{
 				Status: core.StatusFail,
 				Output: fmt.Sprintf("Failed to open DB connection: %v", err),
@@ -102,7 +103,6 @@ func NewPostgresCheckerWithOpenDBFunc(descriptor core.Descriptor, checkInterval 
 
 	return newPostgresCheckerInternal(descriptor, checkInterval, dbConn)
 }
-
 
 // newPostgresCheckerInternal creates a new PostgreSQL health checker component with a provided dbConnection.
 // It continuously pings the database with "SELECT 1" and updates its status.
@@ -136,6 +136,7 @@ func newPostgresCheckerInternal(descriptor core.Descriptor, checkInterval time.D
 
 	return checker
 }
+
 // Close stops the checker's background operations and closes the database connection.
 func (p *postgresChecker) Close() error {
 	p.mutex.Lock()
@@ -245,10 +246,14 @@ func (p *postgresChecker) startHealthCheckLoop() {
 		case <-ticker.C:
 			p.performHealthCheck()
 		case <-p.quit: // Explicit quit signal
-			_ = p.db.Close()
+			if err := p.db.Close(); err != nil {
+				log.Printf("Error closing PostgreSQL connection on quit: %v", err)
+			}
 			return
 		case <-p.ctx.Done(): // Context cancellation signal
-			_ = p.db.Close()
+			if err := p.db.Close(); err != nil {
+				log.Printf("Error closing PostgreSQL connection on context done: %v", err)
+			}
 			return
 		}
 	}

@@ -5,4 +5,5 @@ use (
 	./src/core
 	./src/mongodb
 	./src/postgres
+	./src/vault
 )
