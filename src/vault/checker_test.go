@@ -609,35 +609,31 @@ func TestVaultChecker_UserPassAuth(t *testing.T) {
 		Description:   "Test Vault userpass authentication",
 	}
 
-	// This mockOpenClient will perform the full authentication flow each time it's called.
-	mockOpenClient := func(cfg *api.Config) (checker.VaultClient, error) {
-		// 1. Construct a new Vault API client configured for the GlobalVaultAddr.
-		config := api.DefaultConfig()
-		config.Address = GlobalVaultAddr // Use the global address from Testcontainers
-		client, err := api.NewClient(config)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create client in mockOpenClient: %v", err)
-		}
+	// 1. Construct a new Vault API client configured for the GlobalVaultAddr.
+	vaultConfig := api.DefaultConfig()
+	vaultConfig.Address = GlobalVaultAddr // Use the global address from Testcontainers
+	userPassAPIClient, err := api.NewClient(vaultConfig)
+	assert.NoError(t, err)
+	assert.NotNil(t, userPassAPIClient)
 
-		// 2. Authenticate using the userpass method with "testuser" and "testpassword".
-		options := map[string]interface{}{
-			"password": "testpassword",
-		}
-		secret, err := client.Logical().Write("auth/userpass/login/testuser", options)
-		if err != nil {
-			return nil, fmt.Errorf("failed to login to Vault with userpass in mockOpenClient: %v", err)
-		}
-		if secret == nil || secret.Auth == nil || secret.Auth.ClientToken == "" {
-			return nil, fmt.Errorf("userpass login did not return a client token in mockOpenClient")
-		}
-
-		// 3. Set the client token for subsequent operations.
-		client.SetToken(secret.Auth.ClientToken)
-		return &realVaultClient{client: client}, nil
+	// 2. Authenticate using the userpass method with "testuser" and "testpassword".
+	options := map[string]interface{}{
+		"password": "testpassword",
 	}
+	secret, err := userPassAPIClient.Logical().Write("auth/userpass/login/testuser", options)
+	assert.NoError(t, err)
+	assert.NotNil(t, secret)
+	assert.NotEmpty(t, secret.Auth.ClientToken)
 
-	// Initialize a checker.NewVaultCheckerWithOpenVaultClientFunc with the mockOpenClient.
-	testChecker := checker.NewVaultCheckerWithOpenVaultClientFunc(descriptor, 1*time.Second, api.DefaultConfig(), mockOpenClient)
+	// 3. Set the client token for subsequent operations.
+	userPassAPIClient.SetToken(secret.Auth.ClientToken)
+	assert.Equal(t, secret.Auth.ClientToken, userPassAPIClient.Token())
+
+	// 4. Wrap the authenticated api.Client in a checker.VaultClient implementation.
+	authenticatedVaultClient := &realVaultClient{client: userPassAPIClient}
+
+	// 5. Initialize a checker using the NewVaultCheckerWithClient constructor.
+	testChecker := checker.NewVaultCheckerWithClient(descriptor, 1*time.Second, authenticatedVaultClient)
 	assert.NotNil(t, testChecker)
 	defer func() {
 		err := testChecker.Close()
