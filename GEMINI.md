@@ -36,6 +36,7 @@ interactions and code modifications.
 *   **Confirm Scope:** If a request is open-ended (e.g., "add missing tests") and affects multiple
     files/packages, explicitly clarify the scope with the user (e.g., "Should I also cover `service.go`
     in addition to `component.go`?"). This avoids misinterpreting implicit intentions.
+*   Do not include "src/" in the module names.
 
 ## Specific Learnings from this Session
 
