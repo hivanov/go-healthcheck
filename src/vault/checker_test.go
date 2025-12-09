@@ -603,37 +603,40 @@ func TestVaultChecker_StatusChange(t *testing.T) {
 func TestVaultChecker_UserPassAuth(t *testing.T) {
 	assert.NotNil(t, GlobalVaultClient, "Vault client should be initialized in TestMain")
 
-	// 1. Construct a new Vault API client configured for the GlobalVaultAddr.
-	config := api.DefaultConfig()
-	config.Address = GlobalVaultAddr
-	userPassClient, err := api.NewClient(config)
-	assert.NoError(t, err)
-	assert.NotNil(t, userPassClient)
-
-	// 2. Authenticate using the userpass method with "testuser" and "testpassword".
-	options := map[string]interface{}{
-		"password": "testpassword",
-	}
-	secret, err := userPassClient.Logical().Write("auth/userpass/login/testuser", options)
-	assert.NoError(t, err)
-	assert.NotNil(t, secret)
-	assert.NotEmpty(t, secret.Auth.ClientToken)
-
-	// 3. Verify that a client token is successfully obtained.
-	userPassClient.SetToken(secret.Auth.ClientToken)
-	assert.Equal(t, secret.Auth.ClientToken, userPassClient.Token())
-
 	descriptor := core.Descriptor{
 		ComponentID:   "test-vault-userpass-auth",
 		ComponentType: "vault",
 		Description:   "Test Vault userpass authentication",
 	}
 
-	// 4. Create a checker.VaultClient instance using this authenticated client.
-	// 5. Initialize a checker.NewVaultCheckerWithOpenVaultClientFunc with the authenticated client.
-	mockOpenClient := func(config *api.Config) (checker.VaultClient, error) {
-		return &realVaultClient{client: userPassClient}, nil
+	// This mockOpenClient will perform the full authentication flow each time it's called.
+	mockOpenClient := func(cfg *api.Config) (checker.VaultClient, error) {
+		// 1. Construct a new Vault API client configured for the GlobalVaultAddr.
+		config := api.DefaultConfig()
+		config.Address = GlobalVaultAddr // Use the global address from Testcontainers
+		client, err := api.NewClient(config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create client in mockOpenClient: %v", err)
+		}
+
+		// 2. Authenticate using the userpass method with "testuser" and "testpassword".
+		options := map[string]interface{}{
+			"password": "testpassword",
+		}
+		secret, err := client.Logical().Write("auth/userpass/login/testuser", options)
+		if err != nil {
+			return nil, fmt.Errorf("failed to login to Vault with userpass in mockOpenClient: %v", err)
+		}
+		if secret == nil || secret.Auth == nil || secret.Auth.ClientToken == "" {
+			return nil, fmt.Errorf("userpass login did not return a client token in mockOpenClient")
+		}
+
+		// 3. Set the client token for subsequent operations.
+		client.SetToken(secret.Auth.ClientToken)
+		return &realVaultClient{client: client}, nil
 	}
+
+	// Initialize a checker.NewVaultCheckerWithOpenVaultClientFunc with the mockOpenClient.
 	testChecker := checker.NewVaultCheckerWithOpenVaultClientFunc(descriptor, 1*time.Second, api.DefaultConfig(), mockOpenClient)
 	assert.NotNil(t, testChecker)
 	defer func() {

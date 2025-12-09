@@ -96,6 +96,12 @@ func NewVaultCheckerWithOpenVaultClientFunc(descriptor core.Descriptor, checkInt
 	return newVaultCheckerInternal(descriptor, checkInterval, vaultClient)
 }
 
+// NewVaultCheckerWithClient creates a new HashiCorp Vault health checker component using an already initialized Vault client.
+// This allows users to provide a Vault client that has been set up and authenticated externally.
+func NewVaultCheckerWithClient(descriptor core.Descriptor, checkInterval time.Duration, client VaultClient) core.Component {
+	return newVaultCheckerInternal(descriptor, checkInterval, client)
+}
+
 // newVaultCheckerInternal creates a new HashiCorp Vault health checker component with a provided vaultClient.
 // It continuously checks the Vault's health status and updates its own status.
 // This is an internal constructor used for testing purposes and for injecting a vaultClient.
