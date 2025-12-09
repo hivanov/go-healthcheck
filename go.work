@@ -3,7 +3,13 @@ go 1.25.5
 use (
 	./src/builtin
 	./src/core
+	./src/mariadb
 	./src/mongodb
 	./src/postgres
+	./src/rabbitmq
+	./src/redis
+	./src/s3
+	./src/solace
+	./src/sqlserver
 	./src/vault
 )
