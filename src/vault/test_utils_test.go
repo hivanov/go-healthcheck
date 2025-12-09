@@ -107,16 +107,16 @@ func SetupVaultContainerForTests(ctx context.Context) (testcontainers.Container,
 	log.Println("Userpass auth method enabled.")
 
 	// Create a test user and associate the policy
-	userpassMountPath := "auth/userpass/users/testuser"
+	userpassMountPath := "auth/userpass/users/boo-user"
 	userData := map[string]interface{}{
-		"password": "testpassword",
+		"password": "boo-password",
 		"policies": []string{vaultPolicyName},
 	}
 	_, err = client.Logical().Write(userpassMountPath, userData)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("failed to create test user: %v", err)
 	}
-	log.Println("Test user 'testuser' created with 'dev-policy'.")
+	log.Println("Test user 'boo-user' created with 'dev-policy'.")
 
 	return vaultC, vaultAddr, client, nil
 }

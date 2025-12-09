@@ -616,11 +616,11 @@ func TestVaultChecker_UserPassAuth(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, userPassAPIClient)
 
-	// 2. Authenticate using the userpass method with "testuser" and "testpassword".
+	// 2. Authenticate using the userpass method with "boo-user" and "boo-password".
 	options := map[string]interface{}{
-		"password": "testpassword",
+		"password": "boo-password",
 	}
-	secret, err := userPassAPIClient.Logical().Write("auth/userpass/login/testuser", options)
+	secret, err := userPassAPIClient.Logical().Write("auth/userpass/login/boo-user", options)
 	assert.NoError(t, err)
 	assert.NotNil(t, secret)
 	assert.NotEmpty(t, secret.Auth.ClientToken)
