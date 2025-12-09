@@ -13,7 +13,7 @@ import (
 
 // connection interface for mocking *amqp.Connection in tests.
 type amqpConnection interface {
-	Channel() (*amqp.Channel, error)
+	Channel() (amqpChannel, error)
 	Close() error
 	IsClosed() bool
 }
@@ -21,7 +21,8 @@ type amqpConnection interface {
 // channel interface for mocking *amqp.Channel in tests.
 type amqpChannel interface {
 	Confirm(noWait bool) error
-	PublishWithDeferredConfirm(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) *amqp.DeferredConfirmation
+	Publish(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) error
+	PublishWithDeferredConfirm(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) (*amqp.DeferredConfirmation, error)
 	Close() error
 }
 
@@ -30,8 +31,12 @@ type realAMQPConnection struct {
 	conn *amqp.Connection
 }
 
-func (r *realAMQPConnection) Channel() (*amqp.Channel, error) {
-	return r.conn.Channel()
+func (r *realAMQPConnection) Channel() (amqpChannel, error) { // Corrected return type
+	ch, err := r.conn.Channel()
+	if err != nil {
+		return nil, err
+	}
+	return &realAMQPChannel{ch: ch}, nil // Returns our realAMQPChannel wrapper
 }
 
 func (r *realAMQPConnection) Close() error {
@@ -51,7 +56,11 @@ func (r *realAMQPChannel) Confirm(noWait bool) error {
 	return r.ch.Confirm(noWait)
 }
 
-func (r *realAMQPChannel) PublishWithDeferredConfirm(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) *amqp.DeferredConfirmation {
+func (r *realAMQPChannel) Publish(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) error {
+	return r.ch.Publish(exchange, routingKey, mandatory, immediate, msg)
+}
+
+func (r *realAMQPChannel) PublishWithDeferredConfirm(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) (*amqp.DeferredConfirmation, error) {
 	return r.ch.PublishWithDeferredConfirm(exchange, routingKey, mandatory, immediate, msg)
 }
 

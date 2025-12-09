@@ -1,7 +1,7 @@
 package rabbitmq
 
 import (
-	"context"
+
 	"healthcheck/core"
 	"net/url"
 	"testing"
@@ -11,20 +11,52 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// MockAMQPChannel is a mock implementation of amqpChannel for fuzz testing.
+type MockAMQPChannel struct {
+	failConfirm bool
+	failPublish bool
+	closed      bool
+}
+
+func (m *MockAMQPChannel) Confirm(noWait bool) error {
+	if m.failConfirm {
+		return assert.AnError
+	}
+	return nil
+}
+
+func (m *MockAMQPChannel) Publish(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) error {
+	if m.failPublish { // Assuming failPublish applies to Publish as well
+		return assert.AnError
+	}
+	return nil
+}
+
+func (m *MockAMQPChannel) PublishWithDeferredConfirm(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) (*amqp.DeferredConfirmation, error) {
+	if m.failPublish {
+		return nil, assert.AnError
+	}
+	return &amqp.DeferredConfirmation{}, nil
+}
+
+func (m *MockAMQPChannel) Close() error {
+	m.closed = true
+	return nil
+}
+
 // MockAMQPConnection is a mock implementation of amqpConnection for fuzz testing.
 type MockAMQPConnection struct {
 	failDial      bool
 	failChannel   bool
-	failPublish   bool
 	connectionURL string
 	closed        bool
 }
 
-func (m *MockAMQPConnection) Channel() (*amqp.Channel, error) {
+func (m *MockAMQPConnection) Channel() (amqpChannel, error) { // Corrected return type
 	if m.failChannel {
 		return nil, assert.AnError
 	}
-	return &amqp.Channel{}, nil // Return a dummy channel
+	return &MockAMQPChannel{}, nil // Returns our mock channel
 }
 
 func (m *MockAMQPConnection) Close() error {
