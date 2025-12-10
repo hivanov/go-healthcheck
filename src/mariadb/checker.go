@@ -47,6 +47,7 @@ func (r *realDBConnection) Close() error {
 
 type mariadbChecker struct {
 	checkInterval    time.Duration
+	queryTimeout     time.Duration // New field for query timeout
 	connectionString string
 	db               dbConnection
 	descriptor       core.Descriptor
@@ -76,14 +77,14 @@ func newSQLDBConnection(driverName, connectionString string) (dbConnection, erro
 // NewMariaDBChecker creates a new MariaDB health checker component.
 // It continuously pings the database with "SELECT 1" and updates its status.
 // This is the public constructor that handles opening the SQL DB connection.
-func NewMariaDBChecker(descriptor core.Descriptor, checkInterval time.Duration, connectionString string) core.Component {
-	return NewMariaDBCheckerWithOpenDBFunc(descriptor, checkInterval, connectionString, newSQLDBConnection)
+func NewMariaDBChecker(descriptor core.Descriptor, checkInterval, queryTimeout time.Duration, connectionString string) core.Component {
+	return NewMariaDBCheckerWithOpenDBFunc(descriptor, checkInterval, queryTimeout, connectionString, newSQLDBConnection)
 }
 
 // NewMariaDBCheckerWithOpenDBFunc creates a new MariaDB health checker component,
 // allowing a custom OpenDBFunc to be provided for opening the database connection.
 // This is useful for testing scenarios where mocking the database connection is required.
-func NewMariaDBCheckerWithOpenDBFunc(descriptor core.Descriptor, checkInterval time.Duration, connectionString string, openDB OpenDBFunc) core.Component {
+func NewMariaDBCheckerWithOpenDBFunc(descriptor core.Descriptor, checkInterval, queryTimeout time.Duration, connectionString string, openDB OpenDBFunc) core.Component {
 	dbConn, err := openDB("mysql", connectionString) // Use the provided OpenDBFunc and "mysql" driver
 	if err != nil {
 		dummyChecker := &mariadbChecker{
@@ -101,13 +102,13 @@ func NewMariaDBCheckerWithOpenDBFunc(descriptor core.Descriptor, checkInterval t
 		return dummyChecker
 	}
 
-	return newMariaDBCheckerInternal(descriptor, checkInterval, dbConn)
+	return newMariaDBCheckerInternal(descriptor, checkInterval, queryTimeout, dbConn)
 }
 
 // newMariaDBCheckerInternal creates a new MariaDB health checker component with a provided dbConnection.
 // It continuously pings the database with "SELECT 1" and updates its status.
 // This is an internal constructor used for testing purposes and for injecting a dbConnection.
-func newMariaDBCheckerInternal(descriptor core.Descriptor, checkInterval time.Duration, conn dbConnection) core.Component {
+func newMariaDBCheckerInternal(descriptor core.Descriptor, checkInterval, queryTimeout time.Duration, conn dbConnection) core.Component {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	// Initial status is initializing
@@ -118,7 +119,8 @@ func newMariaDBCheckerInternal(descriptor core.Descriptor, checkInterval time.Du
 
 	checker := &mariadbChecker{
 		checkInterval:    checkInterval,
-		connectionString: "", // Not applicable when dbConnection is provided directly
+		queryTimeout:     queryTimeout, // Initialize queryTimeout
+		connectionString: "",           // Not applicable when dbConnection is provided directly
 		descriptor:       descriptor,
 		currentStatus:    initialStatus,
 		statusChangeChan: make(chan core.ComponentStatus, 1), // Buffered to prevent blocking
@@ -285,7 +287,9 @@ func (m *mariadbChecker) performHealthCheck() {
 	}
 
 	startTime := time.Now()
-	row := m.db.QueryRowContext(m.ctx, "SELECT 1")
+	queryCtx, cancelQuery := context.WithTimeout(m.ctx, m.queryTimeout)
+	defer cancelQuery()
+	row := m.db.QueryRowContext(queryCtx, "SELECT 1")
 	var result int
 	err := row.Scan(&result)
 	elapsedTime := time.Since(startTime)

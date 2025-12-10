@@ -141,3 +141,66 @@ func TestUptimeHealthAndDescriptor(t *testing.T) {
 	require.True(t, ok, "Health ObservedValue should be a float64")
 	assert.GreaterOrEqual(t, uptime, 0.0, "Health uptime should be non-negative")
 }
+
+func FuzzUptime(f *testing.F) {
+	f.Add(int64(10)) // Seed with a small duration in milliseconds
+	f.Add(int64(100))
+	f.Add(int64(500))
+
+	f.Fuzz(func(t *testing.T, delay int64) {
+		c := NewUptimeComponent()
+		defer func() {
+			// Always attempt to close, but expect no error from close if already closed.
+			_ = c.Close()
+		}()
+
+		// Ensure delay is non-negative
+		if delay < 0 {
+			delay = 0
+		}
+		opDelay := time.Duration(delay) * time.Millisecond
+
+		// Perform random operations
+		for i := 0; i < 100; i++ {
+			switch i % 6 {
+			case 0:
+				_ = c.Status()
+			case 1:
+				_ = c.Descriptor()
+			case 2:
+				_ = c.Health()
+			case 3:
+				c.Disable()
+			case 4:
+				c.Enable()
+			case 5:
+				c.ChangeStatus(core.ComponentStatus{Status: core.StatusFail, Output: "fuzz"})
+			}
+			time.Sleep(opDelay / 10) // Small delay between operations
+		}
+		// Final close, should be idempotent
+		assert.NoError(t, c.Close(), "Close() returned an error in fuzz test")
+	})
+}
+
+func BenchmarkUptime_HealthLoad(b *testing.B) {
+	c := NewUptimeComponent()
+	defer func() {
+		assert.NoError(b, c.Close(), "Close() returned an error in benchmark cleanup")
+	}()
+
+	// Ensure the component is initialized and stable before benchmarking
+	time.Sleep(100 * time.Millisecond)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_ = c.Health()
+		}
+	})
+
+	opsPerSecond := float64(b.N) / b.Elapsed().Seconds()
+	require.GreaterOrEqual(b, opsPerSecond, 200.0, "Expected at least 200 operations per second for Health()")
+}

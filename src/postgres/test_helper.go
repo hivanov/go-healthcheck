@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
@@ -21,7 +21,7 @@ func setupPostgresContainer(tb testing.TB, ctx context.Context) (testcontainers.
 	pgContainer, err := postgres.Run(startupCtx, // Use startupCtx
 		"postgres:15-alpine",
 		postgres.WithDatabase("testdb"),
-		postgres.WithUsername("testuser"),		
+		postgres.WithUsername("testuser"),
 		postgres.WithPassword("testpass"),
 		postgres.BasicWaitStrategies(),
 	)
@@ -29,11 +29,11 @@ func setupPostgresContainer(tb testing.TB, ctx context.Context) (testcontainers.
 		tb.Fatalf("Failed to start PostgreSQL container: %v", err) // Use tb
 	}
 
-	assert.NotNil(tb, pgContainer, "PostgreSQL container is nil") // Use tb
+	require.NotNil(tb, pgContainer, "PostgreSQL container is nil") // Use tb
 
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable") // Use passed ctx
 	if err != nil && pgContainer != nil {
-		_ = pgContainer.Terminate(ctx) // Use passed ctx
+		_ = pgContainer.Terminate(ctx)                        // Use passed ctx
 		tb.Fatalf("Failed to get connection string: %v", err) // Use tb
 	}
 

@@ -7,71 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
-
-// mockMongoConnection is a mock implementation of mongoConnection for testing purposes.
-type mockMongoConnection struct {
-	pingFunc       func(ctx context.Context, rp *readpref.ReadPref) error
-	disconnectFunc func(ctx context.Context) error
-}
-
-func (m *mockMongoConnection) Ping(ctx context.Context, rp *readpref.ReadPref) error {
-	if m.pingFunc != nil {
-		return m.pingFunc(ctx, rp)
-	}
-	return nil
-}
-
-func (m *mockMongoConnection) Disconnect(ctx context.Context) error {
-	if m.disconnectFunc != nil {
-		return m.disconnectFunc(ctx)
-	}
-	return nil
-}
-
-// setupMongoContainer starts a MongoDB container and returns its connection string.
-func setupMongoContainer(tb testing.TB, ctx context.Context) (testcontainers.Container, string, func()) {
-	// Create a context with a timeout for container startup
-	startupCtx, startupCancel := context.WithTimeout(ctx, 2*time.Minute) // Increased timeout for container startup
-	defer startupCancel()
-
-	req := testcontainers.ContainerRequest{
-		Image:        "mongo:6",
-		ExposedPorts: []string{"27017/tcp"},
-		WaitingFor:   wait.ForListeningPort("27017/tcp"),
-	}
-	mongoContainer, err := testcontainers.GenericContainer(startupCtx, testcontainers.GenericContainerRequest{ // Use startupCtx
-		ContainerRequest: req,
-		Started:          true,
-	})
-	if err != nil {
-		tb.Fatalf("Failed to start MongoDB container: %v", err) // Use tb
-	}
-
-	assert.NotNil(tb, mongoContainer, "MongoDB container is nil") // Use tb
-
-	host, err := mongoContainer.Host(ctx) // Use passed ctx
-	if err != nil {
-		tb.Fatalf("Failed to get container host: %v", err) // Use tb
-	}
-	port, err := mongoContainer.MappedPort(ctx, "27017") // Use passed ctx
-	if err != nil {
-		tb.Fatalf("Failed to get container port: %v", err) // Use tb
-	}
-
-	connStr := fmt.Sprintf("mongodb://%s:%s", host, port.Port())
-
-	return mongoContainer, connStr, func() {
-		if err := mongoContainer.Terminate(ctx); err != nil { // Use passed ctx
-			tb.Logf("Failed to terminate MongoDB container: %v", err) // Use tb
-		}
-	}
-}
 
 // TestMongoChecker_Integration_HappyPath tests a successful connection and health check.
 func TestMongoChecker_Integration_HappyPath(t *testing.T) {
@@ -82,7 +21,7 @@ func TestMongoChecker_Integration_HappyPath(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mongo-happy-path", ComponentType: "mongodb"}
 	checkInterval := 50 * time.Millisecond
 
-	checker := NewMongoChecker(desc, checkInterval, connStr)
+	checker := NewMongoChecker(desc, checkInterval, 1*time.Second, connStr)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -92,8 +31,8 @@ func TestMongoChecker_Integration_HappyPath(t *testing.T) {
 	waitForStatus(t, checker, core.StatusPass, 5*time.Second)
 
 	status := checker.Status()
-	assert.Equal(t, core.StatusPass, status.Status)
-	assert.Contains(t, status.Output, "MongoDB is healthy")
+	require.Equal(t, core.StatusPass, status.Status)
+	require.Contains(t, status.Output, "MongoDB is healthy")
 }
 
 // TestMongoChecker_Integration_Fail_NoConnection tests when the database is unreachable.
@@ -104,7 +43,7 @@ func TestMongoChecker_Integration_Fail_NoConnection(t *testing.T) {
 	checkInterval := 50 * time.Millisecond
 
 	clientOptions := options.Client().ApplyURI(invalidConnStr).SetServerSelectionTimeout(2 * time.Second)
-	checker := NewMongoCheckerWithOptions(desc, checkInterval, clientOptions)
+	checker := NewMongoCheckerWithOptions(desc, checkInterval, 1*time.Second, clientOptions)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -112,8 +51,8 @@ func TestMongoChecker_Integration_Fail_NoConnection(t *testing.T) {
 	}()
 
 	status := checker.Status()
-	assert.Equal(t, core.StatusFail, status.Status)
-	assert.Contains(t, status.Output, "Failed to create MongoDB client")
+	require.Equal(t, core.StatusFail, status.Status)
+	require.Contains(t, status.Output, "Failed to create MongoDB client")
 }
 
 // TestMongoChecker_Integration_Fail_DBDown tests the checker reacting to a database going down.
@@ -126,7 +65,7 @@ func TestMongoChecker_Integration_Fail_DBDown(t *testing.T) {
 	checkInterval := 50 * time.Millisecond
 
 	clientOptions := options.Client().ApplyURI(connStr).SetServerSelectionTimeout(2 * time.Second)
-	checker := NewMongoCheckerWithOptions(desc, checkInterval, clientOptions)
+	checker := NewMongoCheckerWithOptions(desc, checkInterval, 1*time.Second, clientOptions)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -142,8 +81,8 @@ func TestMongoChecker_Integration_Fail_DBDown(t *testing.T) {
 	waitForStatus(t, checker, core.StatusFail, 5*time.Second)
 
 	status := checker.Status()
-	assert.Equal(t, core.StatusFail, status.Status)
-	assert.Contains(t, status.Output, "MongoDB health check failed")
+	require.Equal(t, core.StatusFail, status.Status)
+	require.Contains(t, status.Output, "MongoDB health check failed")
 }
 
 // TestMongoChecker_Integration_DisableEnable tests the disable/enable functionality.
@@ -155,7 +94,7 @@ func TestMongoChecker_Integration_DisableEnable(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mongo-disable-enable", ComponentType: "mongodb"}
 	checkInterval := 50 * time.Millisecond
 
-	checker := NewMongoChecker(desc, checkInterval, connStr)
+	checker := NewMongoChecker(desc, checkInterval, 1*time.Second, connStr)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -166,19 +105,19 @@ func TestMongoChecker_Integration_DisableEnable(t *testing.T) {
 
 	checker.Disable()
 	status := checker.Status()
-	assert.Equal(t, core.StatusWarn, status.Status)
-	assert.Equal(t, "MongoDB checker disabled", status.Output)
+	require.Equal(t, core.StatusWarn, status.Status)
+	require.Equal(t, "MongoDB checker disabled", status.Output)
 
 	time.Sleep(checkInterval * 2)
 
 	statusAfterSleep := checker.Status()
-	assert.Equal(t, core.StatusWarn, statusAfterSleep.Status)
-	assert.Equal(t, "MongoDB checker disabled", statusAfterSleep.Output)
+	require.Equal(t, core.StatusWarn, statusAfterSleep.Status)
+	require.Equal(t, "MongoDB checker disabled", statusAfterSleep.Output)
 
 	checker.Enable()
 	status = checker.Status()
-	assert.Equal(t, core.StatusWarn, status.Status)
-	assert.Equal(t, "MongoDB checker enabled, re-initializing...", status.Output)
+	require.Equal(t, core.StatusWarn, status.Status)
+	require.Equal(t, "MongoDB checker enabled, re-initializing...", status.Output)
 
 	waitForStatus(t, checker, core.StatusPass, 5*time.Second)
 }
@@ -192,12 +131,12 @@ func TestMongoChecker_Integration_Close(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mongo-close", ComponentType: "mongodb"}
 	checkInterval := 50 * time.Millisecond
 
-	checker := NewMongoChecker(desc, checkInterval, connStr)
+	checker := NewMongoChecker(desc, checkInterval, 1*time.Second, connStr)
 
 	waitForStatus(t, checker, core.StatusPass, 5*time.Second)
 
 	err := checker.Close()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	select {
 	case <-checker.(*mongoChecker).ctx.Done():
@@ -216,7 +155,7 @@ func TestMongoChecker_Integration_ChangeStatus(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mongo-change-status", ComponentType: "mongodb"}
 	checkInterval := 50 * time.Millisecond
 
-	checker := NewMongoChecker(desc, checkInterval, connStr)
+	checker := NewMongoChecker(desc, checkInterval, 1*time.Second, connStr)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -229,8 +168,8 @@ func TestMongoChecker_Integration_ChangeStatus(t *testing.T) {
 	checker.ChangeStatus(newStatus)
 
 	status := checker.Status()
-	assert.Equal(t, newStatus.Status, status.Status)
-	assert.Equal(t, newStatus.Output, status.Output)
+	require.Equal(t, newStatus.Status, status.Status)
+	require.Equal(t, newStatus.Output, status.Output)
 
 	waitForStatus(t, checker, core.StatusPass, 5*time.Second)
 }
@@ -245,12 +184,12 @@ func TestMongoChecker_OpenError(t *testing.T) {
 	checkInterval := 50 * time.Millisecond
 
 	clientOptions := options.Client().ApplyURI("mongodb://localhost:12345")
-	checker := NewMongoCheckerWithOpenDBFunc(desc, checkInterval, clientOptions, mockOpenDB)
+	checker := NewMongoCheckerWithOpenDBFunc(desc, checkInterval, 1*time.Second, clientOptions, mockOpenDB)
 
 	status := checker.Status()
-	assert.Equal(t, core.StatusFail, status.Status)
-	assert.Contains(t, status.Output, "Failed to create MongoDB client")
-	assert.Contains(t, status.Output, "mocked mongo.Connect error for context", "Expected output to contain the mocked error with context")
+	require.Equal(t, core.StatusFail, status.Status)
+	require.Contains(t, status.Output, "Failed to create MongoDB client")
+	require.Contains(t, status.Output, "mocked mongo.Connect error for context", "Expected output to contain the mocked error with context")
 }
 
 // TestMongoChecker_PerformHealthCheck_ClientNil tests performHealthCheck when the client is nil.
@@ -260,8 +199,8 @@ func TestMongoChecker_PerformHealthCheck_ClientNil(t *testing.T) {
 	}
 	checker.performHealthCheck()
 	status := checker.Status()
-	assert.Equal(t, core.StatusFail, status.Status)
-	assert.Equal(t, "MongoDB client is nil", status.Output)
+	require.Equal(t, core.StatusFail, status.Status)
+	require.Equal(t, "MongoDB client is nil", status.Output)
 }
 
 // TestMongoChecker_PerformHealthCheck_PingError tests performHealthCheck when Ping returns an error.
@@ -272,17 +211,17 @@ func TestMongoChecker_PerformHealthCheck_PingError(t *testing.T) {
 		},
 	}
 
-	checker := newMongoCheckerInternal(core.Descriptor{}, 1*time.Second, mockClient, "")
+	checker := newMongoCheckerInternal(core.Descriptor{}, 1*time.Second, 1*time.Second, mockClient, "")
 	defer func() {
 		err := checker.Close()
-		assert.NoError(t, err, "Checker Close() returned an unexpected error: %v", err)
+		require.NoError(t, err, "Checker Close() returned an unexpected error: %v", err)
 	}()
 
 	checker.(*mongoChecker).performHealthCheck()
 
 	status := checker.Status()
-	assert.Equal(t, core.StatusFail, status.Status)
-	assert.Contains(t, status.Output, "mocked ping error")
+	require.Equal(t, core.StatusFail, status.Status)
+	require.Contains(t, status.Output, "mocked ping error")
 }
 
 // TestMongoChecker_Close_NilClient tests the Close method when the client is nil.
@@ -292,7 +231,7 @@ func TestMongoChecker_Close_NilClient(t *testing.T) {
 		quit:       make(chan struct{}),
 	}
 	err := checker.Close()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 }
 
 // TestNewMongoConnection_ContextCanceled tests newMongoConnection with a canceled context.
@@ -302,14 +241,14 @@ func TestNewMongoConnection_ContextCanceled(t *testing.T) {
 
 	opts := options.Client().ApplyURI("mongodb://localhost:12345")
 	client, err := newMongoConnection(ctx, opts)
-	assert.Error(t, err)
-	assert.Nil(t, client)
+	require.Error(t, err)
+	require.Nil(t, client)
 }
 
 // TestMongoChecker_QuitChannelStopsLoop tests that closing the quit channel stops the health check loop.
 func TestMongoChecker_QuitChannelStopsLoop(t *testing.T) {
 	mockClient := &mockMongoConnection{}
-	checker := newMongoCheckerInternal(core.Descriptor{}, 1*time.Second, mockClient, "")
+	checker := newMongoCheckerInternal(core.Descriptor{}, 1*time.Second, 1*time.Second, mockClient, "")
 
 	// consume the initial status
 	<-checker.StatusChange()

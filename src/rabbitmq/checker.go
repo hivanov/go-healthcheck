@@ -69,17 +69,18 @@ func (r *realAMQPChannel) Close() error {
 }
 
 type rabbitMQChecker struct {
-	checkInterval    time.Duration
-	connectionString string
-	conn             amqpConnection // Changed from *amqp.Connection
-	descriptor       core.Descriptor
-	currentStatus    core.ComponentStatus
-	statusChangeChan chan core.ComponentStatus
-	quit             chan struct{}
-	mutex            sync.RWMutex
-	cancelFunc       context.CancelFunc
-	ctx              context.Context
-	disabled         bool
+	checkInterval     time.Duration
+	operationsTimeout time.Duration // New field for RabbitMQ operation timeout
+	connectionString  string
+	conn              amqpConnection // Changed from *amqp.Connection
+	descriptor        core.Descriptor
+	currentStatus     core.ComponentStatus
+	statusChangeChan  chan core.ComponentStatus
+	quit              chan struct{}
+	mutex             sync.RWMutex
+	cancelFunc        context.CancelFunc
+	ctx               context.Context
+	disabled          bool
 }
 
 // OpenAMQPFunc defines the signature for a function that can open a RabbitMQ connection.
@@ -97,14 +98,14 @@ func newRealAMQPConnection(url string) (amqpConnection, error) {
 
 // NewRabbitMQChecker creates a new RabbitMQ health checker component.
 // It continuously checks the connection and publishes a test message.
-func NewRabbitMQChecker(descriptor core.Descriptor, checkInterval time.Duration, connectionString string) core.Component {
-	return NewRabbitMQCheckerWithOpenAMQPFunc(descriptor, checkInterval, connectionString, newRealAMQPConnection)
+func NewRabbitMQChecker(descriptor core.Descriptor, checkInterval, operationsTimeout time.Duration, connectionString string) core.Component {
+	return NewRabbitMQCheckerWithOpenAMQPFunc(descriptor, checkInterval, operationsTimeout, connectionString, newRealAMQPConnection)
 }
 
 // NewRabbitMQCheckerWithOpenAMQPFunc creates a new RabbitMQ health checker component,
 // allowing a custom OpenAMQPFunc to be provided for opening the connection.
 // This is useful for testing scenarios where mocking the connection is required.
-func NewRabbitMQCheckerWithOpenAMQPFunc(descriptor core.Descriptor, checkInterval time.Duration, connectionString string, openAMQP OpenAMQPFunc) core.Component {
+func NewRabbitMQCheckerWithOpenAMQPFunc(descriptor core.Descriptor, checkInterval, operationsTimeout time.Duration, connectionString string, openAMQP OpenAMQPFunc) core.Component {
 	amqpConn, err := openAMQP(connectionString)
 	if err != nil {
 		dummyChecker := &rabbitMQChecker{
@@ -122,12 +123,12 @@ func NewRabbitMQCheckerWithOpenAMQPFunc(descriptor core.Descriptor, checkInterva
 		return dummyChecker
 	}
 
-	return newRabbitMQCheckerInternal(descriptor, checkInterval, amqpConn)
+	return newRabbitMQCheckerInternal(descriptor, checkInterval, operationsTimeout, amqpConn)
 }
 
 // newRabbitMQCheckerInternal creates a new RabbitMQ health checker component with a provided amqpConnection.
 // It continuously checks the connection and publishes a test message.
-func newRabbitMQCheckerInternal(descriptor core.Descriptor, checkInterval time.Duration, conn amqpConnection) core.Component {
+func newRabbitMQCheckerInternal(descriptor core.Descriptor, checkInterval, operationsTimeout time.Duration, conn amqpConnection) core.Component {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	initialStatus := core.ComponentStatus{
@@ -136,16 +137,17 @@ func newRabbitMQCheckerInternal(descriptor core.Descriptor, checkInterval time.D
 	}
 
 	checker := &rabbitMQChecker{
-		checkInterval:    checkInterval,
-		connectionString: "", // Not applicable when amqpConnection is provided directly
-		descriptor:       descriptor,
-		currentStatus:    initialStatus,
-		statusChangeChan: make(chan core.ComponentStatus, 1),
-		quit:             make(chan struct{}),
-		ctx:              ctx,
-		cancelFunc:       cancelFunc,
-		disabled:         false,
-		conn:             conn,
+		checkInterval:     checkInterval,
+		operationsTimeout: operationsTimeout, // Initialize operationsTimeout
+		connectionString:  "",                // Not applicable when amqpConnection is provided directly
+		descriptor:        descriptor,
+		currentStatus:     initialStatus,
+		statusChangeChan:  make(chan core.ComponentStatus, 1),
+		quit:              make(chan struct{}),
+		ctx:               ctx,
+		cancelFunc:        cancelFunc,
+		disabled:          false,
+		conn:              conn,
 	}
 
 	go checker.startHealthCheckLoop()
@@ -293,6 +295,9 @@ func (r *rabbitMQChecker) performHealthCheck() {
 	}
 
 	startTime := time.Now()
+	opCtx, cancelOp := context.WithTimeout(r.ctx, r.operationsTimeout)
+	defer cancelOp()
+
 	channel, err := r.conn.Channel()
 	if err != nil {
 		r.updateStatus(core.ComponentStatus{
@@ -312,11 +317,11 @@ func (r *rabbitMQChecker) performHealthCheck() {
 
 	// Publish a test message
 	testQueue := "health_check_queue"
-	err = channel.Publish(
-		"",          // exchange
-		testQueue,   // routing key
-		false,       // mandatory
-		false,       // immediate
+	err = channel.PublishWithContext(opCtx, // Use context with timeout
+		"",        // exchange
+		testQueue, // routing key
+		false,     // mandatory
+		false,     // immediate
 		amqp.Publishing{
 			ContentType: "text/plain",
 			Body:        []byte("health check message"),

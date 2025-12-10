@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestMongoChecker_HealthLoad_WithRealDB tests the load handling of the Health() method against a real containerized DB.
@@ -18,7 +18,7 @@ func TestMongoChecker_HealthLoad_WithRealDB(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mongo-load-test-real-db", ComponentType: "mongodb"}
 	checkInterval := 50 * time.Millisecond
 
-	checker := NewMongoChecker(desc, checkInterval, connStr)
+	checker := NewMongoChecker(desc, checkInterval, 1*time.Second, connStr)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -42,7 +42,6 @@ func TestMongoChecker_HealthLoad_WithRealDB(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < numCalls/concurrency; j++ {
 				_ = checker.Health()
-				time.Sleep(1 * time.Millisecond)
 			}
 		}()
 	}
@@ -55,5 +54,5 @@ func TestMongoChecker_HealthLoad_WithRealDB(t *testing.T) {
 	t.Logf("Health() method (with real DB) handled %d calls in %v", numCalls, duration)
 	t.Logf("Actual calls per second (with real DB): %.2f", actualCallsPerSecond)
 
-	assert.GreaterOrEqual(t, actualCallsPerSecond, expectedCallsPerSecond, "Health() method should handle at least 200 calls per second")
+	require.GreaterOrEqual(t, actualCallsPerSecond, expectedCallsPerSecond, "Health() method should handle at least 200 calls per second")
 }

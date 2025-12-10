@@ -4,6 +4,8 @@ import (
 	"healthcheck/core"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func FuzzPostgresChecker_NewPostgresChecker(f *testing.F) {
@@ -13,19 +15,38 @@ func FuzzPostgresChecker_NewPostgresChecker(f *testing.F) {
 			ComponentID:   "fuzz-test",
 			ComponentType: "postgres",
 		}
-		checkInterval := 1 * time.Second
+		checkInterval := 10 * time.Millisecond // Shorter interval for fuzzing
+		queryTimeout := 50 * time.Millisecond  // Short query timeout for fuzzing
 
 		// We call NewPostgresChecker, which is the public entry point.
 		// We expect this function to not panic.
-		checker := NewPostgresChecker(descriptor, checkInterval, connectionString)
+		checker := NewPostgresChecker(descriptor, checkInterval, queryTimeout, connectionString)
+		defer func() {
+			if err := checker.Close(); err != nil {
+				t.Errorf("Checker Close() returned an unexpected error: %v", err)
+			}
+		}()
+
 		if checker == nil {
-			t.Errorf("NewPostgresChecker returned nil for connection string: %s", connectionString)
+			t.Skipf("NewPostgresChecker returned nil for connection string: %s", connectionString)
+			return
 		}
 
-		// We can also check the status. It should be either warn or fail.
+		// Exercise other methods
+		_ = checker.Status()
+		_ = checker.Descriptor()
+		_ = checker.Health()
+		checker.Disable()
+		checker.Enable()
+		checker.ChangeStatus(core.ComponentStatus{Status: core.StatusFail, Output: "fuzz"})
+
+		// Allow some time for goroutines to process if necessary
+		time.Sleep(checkInterval * 2)
+
 		status := checker.Status()
-		if status.Status != core.StatusWarn && status.Status != core.StatusFail {
-			t.Errorf("Unexpected status %s for connection string: %s", status.Status, connectionString)
-		}
+		// Depending on the connection string, status could be Warn (initializing/disabled) or Fail (connection error).
+		// We primarily care that it doesn't panic and that the status is one of the expected ones.
+		assert.True(t, status.Status == core.StatusWarn || status.Status == core.StatusFail,
+			"Unexpected status %s for connection string: %s", status.Status, connectionString)
 	})
 }

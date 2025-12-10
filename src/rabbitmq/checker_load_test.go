@@ -34,7 +34,7 @@ func BenchmarkRabbitMQHealthCheck(b *testing.B) {
 	}
 
 	// Create a checker with a long interval so that background checks don't interfere with Health() calls
-	checker := NewRabbitMQChecker(descriptor, 1*time.Hour, amqpURL)
+	checker := NewRabbitMQChecker(descriptor, 1*time.Hour, 1*time.Second, amqpURL)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			log.Printf("Error closing checker after benchmark: %v", err)

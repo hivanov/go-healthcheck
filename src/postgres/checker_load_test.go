@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -41,7 +41,7 @@ func TestPostgresChecker_HealthLoad(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "pg-load-test", ComponentType: "postgres"}
 	checkInterval := 1 * time.Second
 
-	checker := newPostgresCheckerInternal(desc, checkInterval, mockDB)
+	checker := newPostgresCheckerInternal(desc, checkInterval, 1*time.Second, mockDB)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -72,7 +72,7 @@ func TestPostgresChecker_HealthLoad(t *testing.T) {
 	t.Logf("Health() method handled %d calls in %v", atomic.LoadInt64(&totalCalls), duration)
 	t.Logf("Actual calls per second: %.2f", actualCallsPerSecond)
 
-	assert.GreaterOrEqual(t, actualCallsPerSecond, float64(minCallsPerSecond), "Health() method should handle at least %d calls per second", minCallsPerSecond)
+	require.GreaterOrEqual(t, actualCallsPerSecond, float64(minCallsPerSecond), "Health() method should handle at least %d calls per second", minCallsPerSecond)
 }
 
 // TestPostgresChecker_HealthLoad_WithRealDB tests the load handling of the Health() method against a real containerized DB.
@@ -85,7 +85,7 @@ func TestPostgresChecker_HealthLoad_WithRealDB(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "pg-load-test-real-db", ComponentType: "postgres"}
 	checkInterval := 50 * time.Millisecond
 
-	checker := NewPostgresChecker(desc, checkInterval, connStr)
+	checker := NewPostgresChecker(desc, checkInterval, 1*time.Second, connStr)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -133,7 +133,7 @@ func TestPostgresChecker_HealthLoad_WithRealDB(t *testing.T) {
 	t.Logf("Health() method (with real DB) handled %d calls in %v", atomic.LoadInt64(&totalCalls), duration)
 	t.Logf("Actual calls per second (with real DB): %.2f", actualCallsPerSecond)
 
-	assert.GreaterOrEqual(t, actualCallsPerSecond, float64(minCallsPerSecond), "Health() method should handle at least %d calls per second even when DB goes down", minCallsPerSecond)
+	require.GreaterOrEqual(t, actualCallsPerSecond, float64(minCallsPerSecond), "Health() method should handle at least %d calls per second even when DB goes down", minCallsPerSecond)
 
 	// Final check: the checker should be in a Fail state
 	waitForStatus(t, checker, core.StatusFail, 5*time.Second)

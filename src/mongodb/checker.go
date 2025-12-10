@@ -20,6 +20,7 @@ type mongoConnection interface {
 
 type mongoChecker struct {
 	checkInterval    time.Duration
+	pingTimeout      time.Duration // New field for ping timeout
 	connectionString string
 	client           mongoConnection
 	descriptor       core.Descriptor
@@ -49,18 +50,18 @@ func newMongoConnection(ctx context.Context, opts *options.ClientOptions) (mongo
 }
 
 // NewMongoChecker creates a new MongoDB health checker component.
-func NewMongoChecker(descriptor core.Descriptor, checkInterval time.Duration, connectionString string) core.Component {
+func NewMongoChecker(descriptor core.Descriptor, checkInterval, pingTimeout time.Duration, connectionString string) core.Component {
 	clientOptions := options.Client().ApplyURI(connectionString)
-	return NewMongoCheckerWithOptions(descriptor, checkInterval, clientOptions)
+	return NewMongoCheckerWithOptions(descriptor, checkInterval, pingTimeout, clientOptions)
 }
 
 // NewMongoCheckerWithOptions creates a new MongoDB health checker component with the given client options.
-func NewMongoCheckerWithOptions(descriptor core.Descriptor, checkInterval time.Duration, clientOptions *options.ClientOptions) core.Component {
-	return NewMongoCheckerWithOpenDBFunc(descriptor, checkInterval, clientOptions, newMongoConnection)
+func NewMongoCheckerWithOptions(descriptor core.Descriptor, checkInterval, pingTimeout time.Duration, clientOptions *options.ClientOptions) core.Component {
+	return NewMongoCheckerWithOpenDBFunc(descriptor, checkInterval, pingTimeout, clientOptions, newMongoConnection)
 }
 
 // NewMongoCheckerWithOpenDBFunc creates a new MongoDB health checker component with a custom OpenDBFunc.
-func NewMongoCheckerWithOpenDBFunc(descriptor core.Descriptor, checkInterval time.Duration, clientOptions *options.ClientOptions, openDB OpenDBFunc) core.Component {
+func NewMongoCheckerWithOpenDBFunc(descriptor core.Descriptor, checkInterval, pingTimeout time.Duration, clientOptions *options.ClientOptions, openDB OpenDBFunc) core.Component {
 	client, err := openDB(context.Background(), clientOptions)
 	if err != nil {
 		return &mongoChecker{
@@ -76,15 +77,16 @@ func NewMongoCheckerWithOpenDBFunc(descriptor core.Descriptor, checkInterval tim
 		}
 	}
 
-	return newMongoCheckerInternal(descriptor, checkInterval, client, clientOptions.GetURI())
+	return newMongoCheckerInternal(descriptor, checkInterval, pingTimeout, client, clientOptions.GetURI())
 }
 
 // newMongoCheckerInternal creates a new MongoDB health checker component with a provided mongoConnection.
-func newMongoCheckerInternal(descriptor core.Descriptor, checkInterval time.Duration, client mongoConnection, connectionString string) core.Component {
+func newMongoCheckerInternal(descriptor core.Descriptor, checkInterval, pingTimeout time.Duration, client mongoConnection, connectionString string) core.Component {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	checker := &mongoChecker{
 		checkInterval:    checkInterval,
+		pingTimeout:      pingTimeout, // Initialize pingTimeout
 		connectionString: connectionString,
 		client:           client,
 		descriptor:       descriptor,
@@ -211,7 +213,9 @@ func (m *mongoChecker) performHealthCheck() {
 	}
 
 	startTime := time.Now()
-	err := m.client.Ping(m.ctx, readpref.Primary())
+	pingCtx, cancelPing := context.WithTimeout(m.ctx, m.pingTimeout)
+	defer cancelPing()
+	err := m.client.Ping(pingCtx, readpref.Primary())
 	elapsedTime := time.Since(startTime)
 
 	if err != nil {

@@ -88,14 +88,14 @@ func MockOpenAMQPFunc(failDial bool, connectionURL string) OpenAMQPFunc {
 
 func FuzzNewRabbitMQChecker(f *testing.F) {
 	// Seed corpus with valid and invalid connection strings and intervals
-	f.Add("amqp://guest:guest@localhost:5672/", int64(1)) // Valid connection (will fail during actual dial for mock)
-	f.Add("invalid-amqp-url", int64(1))                   // Invalid URL format
-	f.Add("amqp://", int64(1))                            // Incomplete URL
-	f.Add("amqp://guest:guest@host:1234/", int64(0))      // Zero interval
-	f.Add("amqp://guest:guest@host:1234/", int64(-1))     // Negative interval
-	f.Add("amqp://guest:guest@host:1234/", int64(1000))   // Large interval
+	f.Add("amqp://guest:guest@localhost:5672/", int64(1), int64(100)) // Valid connection (will fail during actual dial for mock)
+	f.Add("invalid-amqp-url", int64(1), int64(100))                   // Invalid URL format
+	f.Add("amqp://", int64(1), int64(100))                            // Incomplete URL
+	f.Add("amqp://guest:guest@host:1234/", int64(0), int64(100))      // Zero interval
+	f.Add("amqp://guest:guest@host:1234/", int64(-1), int64(100))     // Negative interval
+	f.Add("amqp://guest:guest@host:1234/", int64(1000), int64(100))   // Large interval
 
-	f.Fuzz(func(t *testing.T, connStr string, interval int64) {
+	f.Fuzz(func(t *testing.T, connStr string, interval int64, opTimeout int64) {
 		descriptor := core.Descriptor{
 			ComponentID:   "fuzz-rabbitmq",
 			ComponentType: "rabbitmq",
@@ -108,15 +108,38 @@ func FuzzNewRabbitMQChecker(f *testing.F) {
 		}
 		checkInterval := time.Duration(interval) * time.Millisecond
 
+		// Ensure opTimeout is positive
+		if opTimeout <= 0 {
+			opTimeout = 1 // Default to 1ms
+		}
+		operationsTimeout := time.Duration(opTimeout) * time.Millisecond
+
 		// Test with failing dial
-		checkerFailDial := NewRabbitMQCheckerWithOpenAMQPFunc(descriptor, checkInterval, connStr, MockOpenAMQPFunc(true, connStr))
+		checkerFailDial := NewRabbitMQCheckerWithOpenAMQPFunc(descriptor, checkInterval, operationsTimeout, connStr, MockOpenAMQPFunc(true, connStr))
+		defer func() {
+			if err := checkerFailDial.Close(); err != nil {
+				t.Errorf("CheckerFailDial Close() returned an unexpected error: %v", err)
+			}
+		}()
+
 		statusFailDial := checkerFailDial.Status()
 		assert.Equal(t, core.StatusFail, statusFailDial.Status)
 		assert.Contains(t, statusFailDial.Output, "Failed to open RabbitMQ connection")
-		assert.NoError(t, checkerFailDial.Close())
+
+		// Exercise other methods
+		_ = checkerFailDial.Health()
+		checkerFailDial.Disable()
+		checkerFailDial.Enable()
+		checkerFailDial.ChangeStatus(core.ComponentStatus{Status: core.StatusPass})
 
 		// Test with successful dial (but will use mock, so connection is not real)
-		checkerSuccessDial := NewRabbitMQCheckerWithOpenAMQPFunc(descriptor, checkInterval, connStr, MockOpenAMQPFunc(false, connStr))
+		checkerSuccessDial := NewRabbitMQCheckerWithOpenAMQPFunc(descriptor, checkInterval, operationsTimeout, connStr, MockOpenAMQPFunc(false, connStr))
+		defer func() {
+			if err := checkerSuccessDial.Close(); err != nil {
+				t.Errorf("CheckerSuccessDial Close() returned an unexpected error: %v", err)
+			}
+		}()
+
 		// Give it a moment to run health check if interval is small
 		time.Sleep(5 * time.Millisecond) // enough for a very quick check, if interval is tiny
 
@@ -124,7 +147,12 @@ func FuzzNewRabbitMQChecker(f *testing.F) {
 		// The status could be WARN (initializing) or FAIL (mock channel/publish failure)
 		// We primarily want to ensure it doesn't crash.
 		assert.True(t, statusSuccessDial.Status == core.StatusWarn || statusSuccessDial.Status == core.StatusFail || statusSuccessDial.Status == core.StatusPass)
-		assert.NoError(t, checkerSuccessDial.Close())
+
+		// Exercise other methods
+		_ = checkerSuccessDial.Health()
+		checkerSuccessDial.Disable()
+		checkerSuccessDial.Enable()
+		checkerSuccessDial.ChangeStatus(core.ComponentStatus{Status: core.StatusFail})
 
 		// Test with unparseable connection string
 		_, err := url.Parse(connStr)

@@ -47,6 +47,7 @@ func (r *realDBConnection) Close() error {
 
 type postgresChecker struct {
 	checkInterval    time.Duration
+	queryTimeout     time.Duration // New field for query timeout
 	connectionString string
 	db               dbConnection // Changed from *sql.DB
 	descriptor       core.Descriptor
@@ -76,14 +77,14 @@ func newSQLDBConnection(driverName, connectionString string) (dbConnection, erro
 // NewPostgresChecker creates a new PostgreSQL health checker component.
 // It continuously pings the database with "SELECT 1" and updates its status.
 // This is the public constructor that handles opening the SQL DB connection.
-func NewPostgresChecker(descriptor core.Descriptor, checkInterval time.Duration, connectionString string) core.Component {
-	return NewPostgresCheckerWithOpenDBFunc(descriptor, checkInterval, connectionString, newSQLDBConnection)
+func NewPostgresChecker(descriptor core.Descriptor, checkInterval, queryTimeout time.Duration, connectionString string) core.Component {
+	return NewPostgresCheckerWithOpenDBFunc(descriptor, checkInterval, queryTimeout, connectionString, newSQLDBConnection)
 }
 
 // NewPostgresCheckerWithOpenDBFunc creates a new PostgreSQL health checker component,
 // allowing a custom OpenDBFunc to be provided for opening the database connection.
 // This is useful for testing scenarios where mocking the database connection is required.
-func NewPostgresCheckerWithOpenDBFunc(descriptor core.Descriptor, checkInterval time.Duration, connectionString string, openDB OpenDBFunc) core.Component {
+func NewPostgresCheckerWithOpenDBFunc(descriptor core.Descriptor, checkInterval, queryTimeout time.Duration, connectionString string, openDB OpenDBFunc) core.Component {
 	dbConn, err := openDB("postgres", connectionString) // Use the provided OpenDBFunc
 	if err != nil {
 		dummyChecker := &postgresChecker{
@@ -101,13 +102,13 @@ func NewPostgresCheckerWithOpenDBFunc(descriptor core.Descriptor, checkInterval 
 		return dummyChecker
 	}
 
-	return newPostgresCheckerInternal(descriptor, checkInterval, dbConn)
+	return newPostgresCheckerInternal(descriptor, checkInterval, queryTimeout, dbConn)
 }
 
 // newPostgresCheckerInternal creates a new PostgreSQL health checker component with a provided dbConnection.
 // It continuously pings the database with "SELECT 1" and updates its status.
 // This is an internal constructor used for testing purposes and for injecting a dbConnection.
-func newPostgresCheckerInternal(descriptor core.Descriptor, checkInterval time.Duration, conn dbConnection) core.Component {
+func newPostgresCheckerInternal(descriptor core.Descriptor, checkInterval, queryTimeout time.Duration, conn dbConnection) core.Component {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	// Initial status is initializing
@@ -118,7 +119,8 @@ func newPostgresCheckerInternal(descriptor core.Descriptor, checkInterval time.D
 
 	checker := &postgresChecker{
 		checkInterval:    checkInterval,
-		connectionString: "", // Not applicable when dbConnection is provided directly
+		queryTimeout:     queryTimeout, // Initialize queryTimeout
+		connectionString: "",           // Not applicable when dbConnection is provided directly
 		descriptor:       descriptor,
 		currentStatus:    initialStatus,
 		statusChangeChan: make(chan core.ComponentStatus, 1), // Buffered to prevent blocking
@@ -280,8 +282,13 @@ func (p *postgresChecker) performHealthCheck() {
 		return
 	}
 
+	// Create a new context with a timeout for the health check query.
+	// This ensures that if the database is unresponsive, the check doesn't hang forever.
+	checkCtx, checkCancel := context.WithTimeout(p.ctx, p.queryTimeout)
+	defer checkCancel()
+
 	startTime := time.Now()
-	row := p.db.QueryRowContext(p.ctx, "SELECT 1")
+	row := p.db.QueryRowContext(checkCtx, "SELECT 1")
 	var result int
 	err := row.Scan(&result)
 	elapsedTime := time.Since(startTime)

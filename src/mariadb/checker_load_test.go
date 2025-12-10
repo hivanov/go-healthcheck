@@ -41,7 +41,7 @@ func TestMariaDBChecker_HealthLoad(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mariadb-load-test", ComponentType: "mariadb"}
 	checkInterval := 1 * time.Second
 
-	checker := newMariaDBCheckerInternal(desc, checkInterval, mockDB)
+	checker := newMariaDBCheckerInternal(desc, checkInterval, 1*time.Second, mockDB)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -85,7 +85,7 @@ func TestMariaDBChecker_HealthLoad_WithRealDB(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mariadb-load-test-real-db", ComponentType: "mariadb"}
 	checkInterval := 50 * time.Millisecond
 
-	checker := NewMariaDBChecker(desc, checkInterval, connStr)
+	checker := NewMariaDBChecker(desc, checkInterval, 1*time.Second, connStr)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)

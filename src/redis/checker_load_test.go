@@ -1,0 +1,135 @@
+package redis
+
+import (
+	"context"
+	"fmt"
+	"healthcheck/core"
+	"log"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/go-redis/redis/v8"
+	"github.com/stretchr/testify/require"
+)
+
+const (
+	minCallsPerSecond = 200
+	testDuration      = 2 * time.Second
+	testConcurrency   = 50
+)
+
+// TestRedisChecker_HealthLoad tests the load handling of the Health() method with a mock client.
+func TestRedisChecker_HealthLoad(t *testing.T) {
+	mockClient := &mockRedisConnection{
+		pingFunc: func(ctx context.Context) *redis.StatusCmd {
+			return redis.NewStatusCmd(ctx) // Always return success
+		},
+		closeFunc: func() error {
+			return nil
+		},
+	}
+
+	desc := core.Descriptor{ComponentID: "redis-load-test", ComponentType: "redis"}
+	checkInterval := 1 * time.Second
+	pingTimeout := 1 * time.Second
+	redisOptions := &redis.Options{Addr: "localhost:6379"}
+
+	checker := newRedisCheckerInternal(desc, checkInterval, pingTimeout, redisOptions, mockClient)
+	defer func() {
+		if err := checker.Close(); err != nil {
+			t.Errorf("Checker Close() returned an unexpected error: %v", err)
+		}
+	}()
+
+	var totalCalls int64
+	var wg sync.WaitGroup
+	wg.Add(testConcurrency)
+
+	startTime := time.Now()
+
+	for i := 0; i < testConcurrency; i++ {
+		go func() {
+			defer wg.Done()
+			for time.Since(startTime) < testDuration {
+				_ = checker.Health()
+				atomic.AddInt64(&totalCalls, 1)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	duration := time.Since(startTime)
+	actualCallsPerSecond := float64(atomic.LoadInt64(&totalCalls)) / duration.Seconds()
+
+	t.Logf("Health() method handled %d calls in %v", atomic.LoadInt64(&totalCalls), duration)
+	t.Logf("Actual calls per second: %.2f", actualCallsPerSecond)
+
+	require.GreaterOrEqual(t, actualCallsPerSecond, float64(minCallsPerSecond), "Health() method should handle at least %d calls per second", minCallsPerSecond)
+}
+
+// TestRedisChecker_HealthLoad_WithRealDB tests the load handling of the Health() method against a real containerized Redis.
+func TestRedisChecker_HealthLoad_WithRealDB(t *testing.T) {
+	ctx := t.Context()
+	redisContainer, redisOptions, cleanup := setupRedisContainer(t, ctx)
+	defer cleanup()
+
+	desc := core.Descriptor{ComponentID: "redis-load-test-real-db", ComponentType: "redis"}
+	checkInterval := 50 * time.Millisecond
+	pingTimeout := 1 * time.Second
+
+	checker := NewRedisChecker(desc, checkInterval, pingTimeout, redisOptions)
+	defer func() {
+		if err := checker.Close(); err != nil {
+			t.Errorf("Checker Close() returned an unexpected error: %v", err)
+		}
+	}()
+
+	// Wait for the checker to become healthy first
+	waitForStatus(t, checker, core.StatusPass, 5*time.Second)
+
+	var stopWg sync.WaitGroup
+	stopWg.Add(1)
+	// Start a goroutine to stop the container after a short delay
+	go func() {
+		defer stopWg.Done()
+		time.Sleep(testDuration / 2) // Stop container halfway through the test duration
+		t.Log("Stopping Redis container during load test...")
+		if err := redisContainer.Stop(ctx, nil); err != nil {
+			t.Logf("Failed to stop Redis container: %v", err)
+		}
+		t.Log("Redis container stopped during load test.")
+	}()
+
+	var totalCalls int64
+	var wg sync.WaitGroup
+	wg.Add(testConcurrency)
+
+	startTime := time.Now()
+
+	for i := 0; i < testConcurrency; i++ {
+		go func() {
+			defer wg.Done()
+			for time.Since(startTime) < testDuration {
+				_ = checker.Health()
+				atomic.AddInt64(&totalCalls, 1)
+			}
+		}()
+	}
+
+	wg.Wait()
+	stopWg.Wait()
+
+	duration := time.Since(startTime)
+	actualCallsPerSecond := float64(atomic.LoadInt64(&totalCalls)) / duration.Seconds()
+
+	t.Logf("Health() method (with real DB) handled %d calls in %v", atomic.LoadInt64(&totalCalls), duration)
+	t.Logf("Actual calls per second (with real DB): %.2f", actualCallsPerSecond)
+
+	require.GreaterOrEqual(t, actualCallsPerSecond, float64(minCallsPerSecond), "Health() method should handle at least %d calls per second even when DB goes down", minCallsPerSecond)
+
+	// Final check: the checker should be in a Fail state
+	waitForStatus(t, checker, core.StatusFail, 5*time.Second)
+}

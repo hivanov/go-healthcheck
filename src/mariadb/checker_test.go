@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // mockDBConnection is a mock implementation of dbConnection for testing purposes.
@@ -57,7 +58,7 @@ func TestMariaDBChecker_Integration_HappyPath(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mariadb-happy-path", ComponentType: "mariadb"}
 	checkInterval := 50 * time.Millisecond // Shorter interval for quicker testing
 
-	checker := NewMariaDBChecker(desc, checkInterval, connStr)
+	checker := NewMariaDBChecker(desc, checkInterval, 1*time.Second, connStr)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -69,18 +70,10 @@ func TestMariaDBChecker_Integration_HappyPath(t *testing.T) {
 	waitForStatus(t, checker, core.StatusPass, 5*time.Second) // Healthy, increased timeout for container readiness
 
 	status := checker.Status()
-	if status.Status != core.StatusPass {
-		t.Errorf("Expected final status %s, got %s", core.StatusPass, status.Status)
-	}
-	if status.Output == "" {
-		t.Error("Expected output message, got empty")
-	}
-	if status.ObservedValue == 0 {
-		t.Error("Expected ObservedValue to be non-zero")
-	}
-	if status.ObservedUnit != "s" {
-		t.Errorf("Expected ObservedUnit 's', got '%s'", status.ObservedUnit)
-	}
+	require.Equal(t, core.StatusPass, status.Status, "Expected final status to be 'pass'")
+	require.NotEmpty(t, status.Output, "Expected output message")
+	require.NotZero(t, status.ObservedValue, "Expected ObservedValue to be non-zero")
+	require.Equal(t, "s", status.ObservedUnit, "Expected ObservedUnit 's'")
 }
 
 // TestMariaDBChecker_Integration_Fail_NoConnection tests when the database is unreachable.
@@ -91,7 +84,7 @@ func TestMariaDBChecker_Integration_Fail_NoConnection(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mariadb-fail-noconn", ComponentType: "mariadb"}
 	checkInterval := 50 * time.Millisecond
 
-	checker := NewMariaDBChecker(desc, checkInterval, invalidConnStr)
+	checker := NewMariaDBChecker(desc, checkInterval, 1*time.Second, invalidConnStr)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -102,12 +95,8 @@ func TestMariaDBChecker_Integration_Fail_NoConnection(t *testing.T) {
 	waitForStatus(t, checker, core.StatusFail, 1*time.Second)
 
 	status := checker.Status()
-	if status.Status != core.StatusFail {
-		t.Errorf("Expected status %s, got %s", core.StatusFail, status.Status)
-	}
-	if status.Output == "" {
-		t.Error("Expected output message, got empty")
-	}
+	require.Equal(t, core.StatusFail, status.Status, "Expected status to be 'fail'")
+	require.NotEmpty(t, status.Output, "Expected output message")
 }
 
 // TestMariaDBChecker_Integration_Fail_DBDown tests the checker reacting to a database going down.
@@ -119,7 +108,7 @@ func TestMariaDBChecker_Integration_Fail_DBDown(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mariadb-fail-dbdown", ComponentType: "mariadb"}
 	checkInterval := 50 * time.Millisecond
 
-	checker := NewMariaDBChecker(desc, checkInterval, connStr)
+	checker := NewMariaDBChecker(desc, checkInterval, 1*time.Second, connStr)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -140,12 +129,8 @@ func TestMariaDBChecker_Integration_Fail_DBDown(t *testing.T) {
 	waitForStatus(t, checker, core.StatusFail, 2*time.Second)
 
 	status := checker.Status()
-	if status.Status != core.StatusFail {
-		t.Errorf("Expected status %s after container stopped, got %s", core.StatusFail, status.Status)
-	}
-	if status.Output == "" {
-		t.Error("Expected output message indicating connection error, got empty")
-	}
+	require.Equal(t, core.StatusFail, status.Status, "Expected status 'fail' after container stopped")
+	require.NotEmpty(t, status.Output, "Expected output message indicating connection error")
 }
 
 // TestMariaDBChecker_Integration_DisableEnable tests the disable/enable functionality.
@@ -157,7 +142,7 @@ func TestMariaDBChecker_Integration_DisableEnable(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mariadb-disable-enable", ComponentType: "mariadb"}
 	checkInterval := 50 * time.Millisecond
 
-	checker := NewMariaDBChecker(desc, checkInterval, connStr)
+	checker := NewMariaDBChecker(desc, checkInterval, 1*time.Second, connStr)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -170,9 +155,8 @@ func TestMariaDBChecker_Integration_DisableEnable(t *testing.T) {
 	// Disable the checker
 	checker.Disable()
 	status := checker.Status()
-	if status.Status != core.StatusWarn || status.Output != "MariaDB checker disabled" {
-		t.Errorf("Expected status 'warn' and output 'MariaDB checker disabled' after Disable, got %s and '%s'", status.Status, status.Output)
-	}
+	require.Equal(t, core.StatusWarn, status.Status, "Expected status 'warn' after Disable")
+	require.Equal(t, "MariaDB checker disabled", status.Output, "Expected output 'MariaDB checker disabled' after Disable")
 
 	// Ensure no status changes occur while disabled
 	select {
@@ -193,17 +177,14 @@ func TestMariaDBChecker_Integration_DisableEnable(t *testing.T) {
 	// Enable the checker
 	checker.Enable()
 	status = checker.Status()
-	if status.Status != core.StatusWarn || status.Output != "MariaDB checker enabled, re-initializing..." {
-		t.Errorf("Expected status 'warn' and output 'MariaDB checker enabled, re-initializing...' after Enable, got %s and '%s'", status.Status, status.Output)
-	}
+	require.Equal(t, core.StatusWarn, status.Status, "Expected status 'warn' after Enable")
+	require.Equal(t, "MariaDB checker enabled, re-initializing...", status.Output, "Expected output 'MariaDB checker enabled, re-initializing...' after Enable")
 
 	// Wait for it to become healthy again
 	waitForStatus(t, checker, core.StatusPass, 2*time.Second)
 
 	status = checker.Status()
-	if status.Status != core.StatusPass {
-		t.Errorf("Expected status %s after re-enable, got %s", core.StatusPass, status.Status)
-	}
+	require.Equal(t, core.StatusPass, status.Status, "Expected status 'pass' after re-enable")
 }
 
 // TestMariaDBChecker_Integration_Close tests graceful shutdown.
@@ -215,16 +196,14 @@ func TestMariaDBChecker_Integration_Close(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mariadb-close", ComponentType: "mariadb"}
 	checkInterval := 50 * time.Millisecond
 
-	checker := NewMariaDBChecker(desc, checkInterval, connStr)
+	checker := NewMariaDBChecker(desc, checkInterval, 1*time.Second, connStr)
 
 	// Wait for it to become healthy first
 	waitForStatus(t, checker, core.StatusPass, 2*time.Second)
 
 	// Close the checker
 	err := checker.Close()
-	if err != nil {
-		t.Errorf("Close() returned an unexpected error: %v", err)
-	}
+	require.NoError(t, err, "Close() returned an unexpected error")
 
 	// Verify that the internal context is cancelled after Close()
 	select {
@@ -252,7 +231,7 @@ func TestMariaDBChecker_Integration_ChangeStatus(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mariadb-change-status", ComponentType: "mariadb"}
 	checkInterval := 50 * time.Millisecond
 
-	checker := NewMariaDBChecker(desc, checkInterval, connStr)
+	checker := NewMariaDBChecker(desc, checkInterval, 1*time.Second, connStr)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -267,27 +246,22 @@ func TestMariaDBChecker_Integration_ChangeStatus(t *testing.T) {
 	checker.ChangeStatus(manualWarnStatus)
 
 	status := checker.Status()
-	if status.Status != manualWarnStatus.Status || status.Output != manualWarnStatus.Output {
-		t.Errorf("Expected status %v, got %v after manual change", manualWarnStatus, status)
-	}
+	require.Equal(t, manualWarnStatus.Status, status.Status, "Expected status after manual change")
+	require.Equal(t, manualWarnStatus.Output, status.Output, "Expected output after manual change")
 
 	// Verify the manual status change is broadcast
 	select {
 	case s := <-checker.StatusChange():
-		if s.Status != manualWarnStatus.Status {
-			t.Errorf("Expected status %s from channel, got %s", manualWarnStatus.Status, s.Status)
-		}
+		require.Equal(t, manualWarnStatus.Status, s.Status, "Expected status from channel")
 	case <-time.After(100 * time.Millisecond):
-		t.Error("Timed out waiting for manual status change notification")
+		t.Fatal("Timed out waiting for manual status change notification")
 	}
 
 	// The periodic check should eventually revert it to Pass
 	waitForStatus(t, checker, core.StatusPass, 1*time.Second)
 
 	status = checker.Status()
-	if status.Status != core.StatusPass {
-		t.Errorf("Expected status %s after periodic check, got %s", core.StatusPass, status.Status)
-	}
+	require.Equal(t, core.StatusPass, status.Status, "Expected status after periodic check")
 }
 
 // TestMariaDBChecker_Getters tests the Descriptor and Health methods.
@@ -325,7 +299,7 @@ func TestMariaDBChecker_Close_NilDB(t *testing.T) {
 	}
 
 	err := checker.Close()
-	assert.NoError(t, err, "Close() on nil DB should not return an error")
+	require.NoError(t, err, "Close() on nil DB should not return an error")
 
 	// Ensure cancelFunc is called (though it's a dummy here)
 	// and quit channel is closed.
@@ -346,7 +320,7 @@ func TestMariaDBChecker_QuitChannelStopsLoop(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mariadb-quit-loop", ComponentType: "mariadb"}
 	checkInterval := 50 * time.Millisecond
 
-	checker := NewMariaDBChecker(desc, checkInterval, connStr)
+	checker := NewMariaDBChecker(desc, checkInterval, 1*time.Second, connStr)
 	// Do not defer checker.Close() here, as we want to manually close the quit channel.
 
 	// Wait for it to become healthy first
@@ -368,7 +342,7 @@ func TestMariaDBChecker_QuitChannelStopsLoop(t *testing.T) {
 	// Clean up the DB connection that was opened by the checker.
 	if checker.(*mariadbChecker).db != nil {
 		err := checker.(*mariadbChecker).db.Close()
-		assert.NoError(t, err, "Error closing database connection after quit")
+		require.NoError(t, err, "Error closing database connection after quit")
 	}
 }
 
@@ -402,7 +376,7 @@ func TestNewMariaDBChecker_OpenError(t *testing.T) {
 	checkInterval := 50 * time.Millisecond
 	connectionString := "some-conn-string" // The content doesn't matter, as our mock will return an error
 
-	checker := NewMariaDBCheckerWithOpenDBFunc(desc, checkInterval, connectionString, mockOpenDB)
+	checker := NewMariaDBCheckerWithOpenDBFunc(desc, checkInterval, 1*time.Second, connectionString, mockOpenDB)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -411,9 +385,9 @@ func TestNewMariaDBChecker_OpenError(t *testing.T) {
 
 	// The checker should immediately be in a Fail state
 	status := checker.Status()
-	assert.Equal(t, core.StatusFail, status.Status, "Expected initial status to be Fail when newSQLDBConnection fails")
-	assert.Contains(t, status.Output, "Failed to open DB connection", "Expected output to indicate DB connection failure")
-	assert.Contains(t, status.Output, "mocked sql.Open error", "Expected output to contain the mocked error")
+	require.Equal(t, core.StatusFail, status.Status, "Expected initial status to be Fail when newSQLDBConnection fails")
+	require.Contains(t, status.Output, "Failed to open DB connection", "Expected output to indicate DB connection failure")
+	require.Contains(t, status.Output, "mocked sql.Open error", "Expected output to contain the mocked error")
 
 	// Ensure the health check loop was not started
 	select {
@@ -431,9 +405,9 @@ func TestNewSQLDBConnection_OpenError(t *testing.T) {
 	connStr := "some-connection-string"
 
 	dbConn, err := newSQLDBConnection(invalidDriverName, connStr)
-	assert.Error(t, err, "Expected an error when opening DB with an invalid driver name")
-	assert.Nil(t, dbConn, "Expected dbConn to be nil when sql.Open fails")
-	assert.Contains(t, err.Error(), "sql: unknown driver", "Expected error message to indicate unknown driver")
+	require.Error(t, err, "Expected an error when opening DB with an invalid driver name")
+	require.Nil(t, dbConn, "Expected dbConn to be nil when sql.Open fails")
+	require.Contains(t, err.Error(), "sql: unknown driver", "Expected error message to indicate unknown driver")
 }
 
 // TestMariaDBChecker_PerformHealthCheck_ResultNotOne tests performHealthCheck when the query returns a result other than 1.
@@ -461,7 +435,7 @@ func TestMariaDBChecker_PerformHealthCheck_ResultNotOne(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mariadb-perform-result-not-one", ComponentType: "mariadb"}
 	checkInterval := 50 * time.Millisecond
 
-	checker := newMariaDBCheckerInternal(desc, checkInterval, mockDB)
+	checker := newMariaDBCheckerInternal(desc, checkInterval, 1*time.Second, mockDB)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -473,8 +447,8 @@ func TestMariaDBChecker_PerformHealthCheck_ResultNotOne(t *testing.T) {
 
 	// Expect status to be Fail
 	status := checker.Status()
-	assert.Equal(t, core.StatusFail, status.Status, "Expected status Fail when result is not 1")
-	assert.Contains(t, status.Output, "MariaDB health check query returned unexpected result: 0 (expected 1)", "Expected specific output")
+	require.Equal(t, core.StatusFail, status.Status, "Expected status Fail when result is not 1")
+	require.Contains(t, status.Output, "MariaDB health check query returned unexpected result: 0 (expected 1)", "Expected specific output")
 }
 
 // TestMariaDBChecker_PerformHealthCheck_ScanError tests performHealthCheck when row.Scan returns an error.
@@ -497,7 +471,7 @@ func TestMariaDBChecker_PerformHealthCheck_ScanError(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "mariadb-perform-scan-error", ComponentType: "mariadb"}
 	checkInterval := 50 * time.Millisecond
 
-	checker := newMariaDBCheckerInternal(desc, checkInterval, mockDB)
+	checker := newMariaDBCheckerInternal(desc, checkInterval, 1*time.Second, mockDB)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			t.Errorf("Checker Close() returned an unexpected error: %v", err)
@@ -509,7 +483,7 @@ func TestMariaDBChecker_PerformHealthCheck_ScanError(t *testing.T) {
 
 	// Expect status to be Fail
 	status := checker.Status()
-	assert.Equal(t, core.StatusFail, status.Status, "Expected status Fail when scan returns an error")
-	assert.Contains(t, status.Output, "MariaDB health check query failed", "Expected specific output")
-	assert.Contains(t, status.Output, "mocked scan error", "Expected output to contain the mocked error")
+	require.Equal(t, core.StatusFail, status.Status, "Expected status Fail when scan returns an error")
+	require.Contains(t, status.Output, "MariaDB health check query failed", "Expected specific output")
+	require.Contains(t, status.Output, "mocked scan error", "Expected output to contain the mocked error")
 }

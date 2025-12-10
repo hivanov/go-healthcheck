@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"testing"
@@ -202,4 +203,62 @@ func TestServiceRecalculatesOnComponentStatusChange(t *testing.T) {
 	ctrlComp.ChangeStatus(ComponentStatus{Status: StatusPass})
 	time.Sleep(50 * time.Millisecond)
 	assert.Equal(t, StatusPass, s.Health().Status, "Expected service status to be 'pass' after component change")
+}
+
+// FuzzService tests the Service's ability to handle various component status changes without panicking.
+func FuzzService(f *testing.F) {
+	// Seed with some initial valid numbers of components and operation counts
+	f.Add(3, 10)
+	f.Add(1, 5)
+	f.Add(10, 20)
+
+	f.Fuzz(func(t *testing.T, numComponents, numOperations int) {
+		// Ensure reasonable bounds for fuzzed inputs
+		if numComponents < 1 || numComponents > 10 {
+			numComponents = 3
+		}
+		if numOperations < 1 || numOperations > 100 {
+			numOperations = 20
+		}
+
+		// Create components
+		components := make([]Component, numComponents)
+		for i := 0; i < numComponents; i++ {
+			components[i] = newTestComponent(
+				// Fuzzer doesn't provide strings for ComponentID directly, so use an int
+				// This also means ComponentType will always be "test-type"
+				// which is fine for fuzzing the core service logic.
+				"comp-"+fmt.Sprintf("%d", i), StatusPass)
+			defer components[i].Close() // Ensure components are closed
+		}
+
+		s := NewService(Descriptor{ServiceID: "fuzz-service"}, components...)
+		defer func() {
+			assert.NoError(t, s.Close(), "Close() returned an error in fuzz test")
+		}()
+
+		// Give a moment for initial status calculation
+		time.Sleep(10 * time.Millisecond)
+
+		// Perform random operations on components
+		for i := 0; i < numOperations; i++ {
+			compIndex := i % numComponents // Cycle through components
+			opType := i % 3                // Cycle through operation types
+
+			switch opType {
+			case 0: // Change status to Pass
+				components[compIndex].ChangeStatus(ComponentStatus{Status: StatusPass})
+			case 1: // Change status to Warn
+				components[compIndex].ChangeStatus(ComponentStatus{Status: StatusWarn, Output: "fuzz warn"})
+			case 2: // Change status to Fail
+				components[compIndex].ChangeStatus(ComponentStatus{Status: StatusFail, Output: "fuzz fail"})
+			}
+			_ = s.Health()               // Check overall service health
+			time.Sleep(time.Millisecond) // Small delay to allow goroutines to process
+		}
+
+		// Final check and close for good measure
+		_ = s.Health()
+		assert.NoError(t, s.Close(), "Close() returned an error at end of fuzz test")
+	})
 }
