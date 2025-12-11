@@ -13,6 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	// smithyendpoints "github.com/aws/smithy-go/endpoints" // Not needed with BaseEndpoint
+	// "github.com/aws/smithy-go" // Not needed with BaseEndpoint
 )
 
 // Client interface for mocking *s3.Client in tests.
@@ -56,19 +58,6 @@ func newRealS3Client(cfg *Config) (Client, error) {
 	awsCfg, err := config.LoadDefaultConfig(context.Background(),
 		config.WithRegion(cfg.Region),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, "")),
-		config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-			if cfg.EndpointURL != "" {
-				return aws.Endpoint{
-					URL:               cfg.EndpointURL,
-					HostnameImmutable: true,
-					Source:            aws.EndpointSourceCustom,
-					SigningRegion:     region,
-					SigningName:       "s3",
-				}, nil
-			}
-			// Fallback to default AWS endpoint resolver by returning EndpointNotFoundError
-			return aws.Endpoint{}, &aws.EndpointNotFoundError{}
-		})),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
@@ -76,6 +65,9 @@ func newRealS3Client(cfg *Config) (Client, error) {
 
 	client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
 		o.UsePathStyle = cfg.S3ForcePathStyle
+		if cfg.EndpointURL != "" {
+			o.BaseEndpoint = aws.String(cfg.EndpointURL)
+		}
 	})
 
 	return client, nil

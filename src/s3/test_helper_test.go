@@ -2,9 +2,8 @@ package s3
 
 import (
 	"context"
-	"fmt" // Re-added fmt import
+	"fmt"
 	"healthcheck/core"
-	//"net/url" // This import was unused and has been removed
 	"testing"
 	"time"
 
@@ -87,20 +86,12 @@ func setupS3Container(tb testing.TB, ctx context.Context) (testcontainers.Contai
 	awsCfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion(s3Config.Region),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(s3Config.AccessKeyID, s3Config.SecretAccessKey, "")),
-		config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-			return aws.Endpoint{
-				URL:               s3Config.EndpointURL,
-				HostnameImmutable: true,
-				Source:            aws.EndpointSourceCustom,
-				SigningRegion:     region,
-				SigningName:       "s3",
-			}, nil
-		})),
 	)
 	require.NoError(tb, err, "Failed to load AWS config for bucket creation")
 
 	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
 		o.UsePathStyle = s3Config.S3ForcePathStyle
+		o.BaseEndpoint = aws.String(s3Config.EndpointURL)
 	})
 
 	_, err = s3Client.CreateBucket(ctx, &s3.CreateBucketInput{
