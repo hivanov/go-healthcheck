@@ -7,11 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-redis/redis/v8" // Using v8 for redis
-	"github.com/stretchr/testify/assert"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/redis"
+	tcRedis "github.com/testcontainers/testcontainers-go/modules/redis"
 )
 
 // mockRedisConnection implements redisConnection for testing purposes.
@@ -41,7 +40,7 @@ func setupRedisContainer(tb testing.TB, ctx context.Context) (testcontainers.Con
 	startupCtx, startupCancel := context.WithTimeout(ctx, 2*time.Minute) // Increased timeout for container startup
 	defer startupCancel()
 
-	redisContainer, err := redis.Run(startupCtx,
+	redisContainer, err := tcRedis.Run(startupCtx,
 		"redis:latest",
 	)
 	if err != nil {

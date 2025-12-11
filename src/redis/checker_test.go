@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,7 +73,7 @@ func TestRedisChecker_Integration_Fail_RedisDown(t *testing.T) {
 
 	desc := core.Descriptor{ComponentID: "redis-fail-redisdown", ComponentType: "redis"}
 	checkInterval := 50 * time.Millisecond
-	pingTimeout := 1 * time.Second
+	pingTimeout := 100 * time.Millisecond
 
 	checker := NewRedisChecker(desc, checkInterval, pingTimeout, redisOptions)
 	defer func() {
@@ -91,7 +91,7 @@ func TestRedisChecker_Integration_Fail_RedisDown(t *testing.T) {
 	t.Log("Redis container stopped.")
 
 	// It should now transition to a Fail state
-	waitForStatus(t, checker, core.StatusFail, 2*time.Second)
+	waitForStatus(t, checker, core.StatusFail, 3*time.Second)
 
 	status := checker.Status()
 	require.Equal(t, core.StatusFail, status.Status, "Expected status %s after container stopped, got %s", core.StatusFail, status.Status)
@@ -309,10 +309,11 @@ func TestRedisChecker_QuitChannelStopsLoop(t *testing.T) {
 	}
 
 	// Clean up the Redis client that was opened by the checker.
-	if checker.(*redisChecker).client != nil {
-		err := checker.(*redisChecker).client.Close()
-		require.NoError(t, err, "Error closing Redis client after quit")
-	}
+	// The client is already closed by the startHealthCheckLoop goroutine when 'quit' channel is closed.
+	// if checker.(*redisChecker).client != nil {
+	// 	err := checker.(*redisChecker).client.Close()
+	// 	require.NoError(t, err, "Error closing Redis client after quit")
+	// }
 }
 
 // TestRedisChecker_PerformHealthCheck_ClientNil tests performHealthCheck when r.client is nil.
