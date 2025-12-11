@@ -2,9 +2,9 @@ package s3
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"healthcheck/core"
-	"log"
 	"sync"
 	"time"
 
@@ -15,26 +15,17 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
-// s3Client interface for mocking *s3.Client in tests.
-type s3Client interface {
+// Client interface for mocking *s3.Client in tests.
+type Client interface {
 	HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
 	// Add other S3 operations if needed for more comprehensive checks
-}
-
-// realS3Client implements s3Client for *s3.Client.
-type realS3Client struct {
-	client *s3.Client
-}
-
-func (r *realS3Client) HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
-	return r.client.HeadBucket(ctx, params, optFns...)
 }
 
 type s3Checker struct {
 	checkInterval    time.Duration
 	operationTimeout time.Duration
-	config           *S3Config
-	client           s3Client
+	config           *Config
+	client           Client
 	descriptor       core.Descriptor
 	currentStatus    core.ComponentStatus
 	statusChangeChan chan core.ComponentStatus
@@ -45,8 +36,8 @@ type s3Checker struct {
 	disabled         bool
 }
 
-// S3Config holds configuration for the S3 checker.
-type S3Config struct {
+// Config holds configuration for the S3 checker.
+type Config struct {
 	EndpointURL      string
 	Region           string
 	BucketName       string
@@ -58,31 +49,26 @@ type S3Config struct {
 
 // OpenS3ClientFunc defines the signature for a function that can open an S3 client.
 // This is used to allow mocking of S3 client creation in tests.
-type OpenS3ClientFunc func(cfg *S3Config) (s3Client, error)
+type OpenS3ClientFunc func(cfg *Config) (Client, error)
 
-// newRealS3Client is a helper function to create a real s3Client from S3Config.
-func newRealS3Client(cfg *S3Config) (s3Client, error) {
-	customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-		if cfg.EndpointURL != "" {
-			return aws.Endpoint{
-				URI:                cfg.EndpointURL,
-				HostnameImmutable:  true, // Important for custom endpoints
-				Source:             aws.EndpointSourceCustom,
-				URL:                cfg.EndpointURL,
-				SigningRegion:      region, // Use the configured region for signing
-				SigningName:        "s3",
-				DisableHTTPS:       cfg.DisableSSL,
-				SourceFromHostname: true,
-			}, nil
-		}
-		// Fallback to default AWS endpoint resolver
-		return aws.Endpoint{}, &aws.EndpointNotFoundError{}
-	})
-
-	awsCfg, err := config.LoadDefaultAWSConfig(context.Background(),
+// newRealS3Client is a helper function to create a real Client from Config.
+func newRealS3Client(cfg *Config) (Client, error) {
+	awsCfg, err := config.LoadDefaultConfig(context.Background(),
 		config.WithRegion(cfg.Region),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, "")),
-		config.WithEndpointResolverWithOptions(customResolver),
+		config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+			if cfg.EndpointURL != "" {
+				return aws.Endpoint{
+					URL:               cfg.EndpointURL,
+					HostnameImmutable: true,
+					Source:            aws.EndpointSourceCustom,
+					SigningRegion:     region,
+					SigningName:       "s3",
+				}, nil
+			}
+			// Fallback to default AWS endpoint resolver by returning EndpointNotFoundError
+			return aws.Endpoint{}, &aws.EndpointNotFoundError{}
+		})),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
@@ -92,17 +78,17 @@ func newRealS3Client(cfg *S3Config) (s3Client, error) {
 		o.UsePathStyle = cfg.S3ForcePathStyle
 	})
 
-	return &realS3Client{client: client}, nil
+	return client, nil
 }
 
 // NewS3Checker creates a new Amazon S3 health checker component.
-func NewS3Checker(descriptor core.Descriptor, checkInterval, operationTimeout time.Duration, s3Config *S3Config) core.Component {
+func NewS3Checker(descriptor core.Descriptor, checkInterval, operationTimeout time.Duration, s3Config *Config) core.Component {
 	return NewS3CheckerWithOpenS3ClientFunc(descriptor, checkInterval, operationTimeout, s3Config, newRealS3Client)
 }
 
 // NewS3CheckerWithOpenS3ClientFunc creates a new Amazon S3 health checker component,
 // allowing a custom OpenS3ClientFunc to be provided for opening the S3 client.
-func NewS3CheckerWithOpenS3ClientFunc(descriptor core.Descriptor, checkInterval, operationTimeout time.Duration, s3Config *S3Config, openS3Client OpenS3ClientFunc) core.Component {
+func NewS3CheckerWithOpenS3ClientFunc(descriptor core.Descriptor, checkInterval, operationTimeout time.Duration, s3Config *Config, openS3Client OpenS3ClientFunc) core.Component {
 	s3Conn, err := openS3Client(s3Config)
 	if err != nil {
 		dummyChecker := &s3Checker{
@@ -116,6 +102,7 @@ func NewS3CheckerWithOpenS3ClientFunc(descriptor core.Descriptor, checkInterval,
 			ctx:              context.Background(),
 			cancelFunc:       func() {},
 			disabled:         false,
+			config:           s3Config, // Pass the s3Config even if client creation failed
 		}
 		return dummyChecker
 	}
@@ -123,8 +110,8 @@ func NewS3CheckerWithOpenS3ClientFunc(descriptor core.Descriptor, checkInterval,
 	return newS3CheckerInternal(descriptor, checkInterval, operationTimeout, s3Config, s3Conn)
 }
 
-// newS3CheckerInternal creates a new Amazon S3 health checker component with a provided s3Client.
-func newS3CheckerInternal(descriptor core.Descriptor, checkInterval, operationTimeout time.Duration, s3Config *S3Config, client s3Client) core.Component {
+// newS3CheckerInternal creates a new Amazon S3 health checker component with a provided Client.
+func newS3CheckerInternal(descriptor core.Descriptor, checkInterval, operationTimeout time.Duration, s3Config *Config, client Client) core.Component {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	initialStatus := core.ComponentStatus{
@@ -226,19 +213,25 @@ func (s *s3Checker) StatusChange() <-chan core.ComponentStatus {
 // Health returns a detailed health report for the S3 component.
 func (s *s3Checker) Health() core.ComponentHealth {
 	s.mutex.RLock()
-	defer s.mutex.RUnlock()
+	status := s.currentStatus
+	s.mutex.RUnlock()
 
-	var output string
-
-	if s.currentStatus.Output != "" {
-		output = s.currentStatus.Output
-	}
-
+	descriptor := s.Descriptor()
 	return core.ComponentHealth{
-		ComponentID:   s.descriptor.ComponentID,
-		ComponentType: s.descriptor.ComponentType,
-		Status:        s.currentStatus.Status,
-		Output:        output,
+		Status:            status.Status,
+		Version:           descriptor.Version,
+		ReleaseID:         descriptor.ReleaseID,
+		Notes:             descriptor.Notes,
+		Output:            status.Output,
+		Links:             descriptor.Links,
+		ServiceID:         descriptor.ServiceID,
+		Description:       descriptor.Description,
+		ComponentID:       descriptor.ComponentID,
+		ComponentType:     descriptor.ComponentType,
+		ObservedValue:     status.ObservedValue,
+		ObservedUnit:      status.ObservedUnit,
+		AffectedEndpoints: status.AffectedEndpoints,
+		Time:              status.Time,
 	}
 }
 
@@ -273,10 +266,10 @@ func (s *s3Checker) performHealthCheck() {
 		return
 	}
 
-	if s.client == nil {
+	if s.client == nil || s.config == nil {
 		s.updateStatus(core.ComponentStatus{
 			Status: core.StatusFail,
-			Output: "S3 client is nil",
+			Output: "S3 client or configuration is nil",
 		})
 		return
 	}
@@ -286,13 +279,13 @@ func (s *s3Checker) performHealthCheck() {
 
 	startTime := time.Now()
 	_, err := s.client.HeadBucket(checkCtx, &s3.HeadBucketInput{
-		Bucket: aws.String(bucketName),
+		Bucket: aws.String(s.config.BucketName), // Use s.config directly here
 	})
 	elapsedTime := time.Since(startTime)
 
 	if err != nil {
-		var noSuchBucket *types.NotFound
-		if s3.IsAWSError(err) && err.Error() == types.NoSuchBucket.ErrorCode() || (noSuchBucket != nil && s3.ErrorCode(err) == noSuchBucket.ErrorCode()) {
+		var nf *types.NotFound
+		if errors.As(err, &nf) {
 			s.updateStatus(core.ComponentStatus{
 				Status:        core.StatusFail,
 				Output:        fmt.Sprintf("S3 bucket '%s' not found or not accessible: %v", bucketName, err),

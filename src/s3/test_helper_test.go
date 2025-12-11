@@ -2,12 +2,14 @@ package s3
 
 import (
 	"context"
-	"fmt"
+	"fmt" // Re-added fmt import
 	"healthcheck/core"
+	//"net/url" // This import was unused and has been removed
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/stretchr/testify/require"
@@ -15,12 +17,12 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-// mockS3Client implements s3Client for mocking in tests.
-type mockS3Client struct {
+// mockClient implements Client for mocking in tests.
+type mockClient struct {
 	headBucketFunc func(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
 }
 
-func (m *mockS3Client) HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
+func (m *mockClient) HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
 	if m.headBucketFunc != nil {
 		return m.headBucketFunc(ctx, params, optFns...)
 	}
@@ -28,7 +30,7 @@ func (m *mockS3Client) HeadBucket(ctx context.Context, params *s3.HeadBucketInpu
 }
 
 // setupS3Container starts a LocalStack container and returns its configuration.
-func setupS3Container(tb testing.TB, ctx context.Context) (testcontainers.Container, *S3Config, func()) {
+func setupS3Container(tb testing.TB, ctx context.Context) (testcontainers.Container, *Config, func()) {
 	// Create a context with a timeout for container startup
 	startupCtx, startupCancel := context.WithTimeout(ctx, 2*time.Minute) // Increased timeout for container startup
 	defer startupCancel()
@@ -47,8 +49,13 @@ func setupS3Container(tb testing.TB, ctx context.Context) (testcontainers.Contai
 	require.NoError(tb, err, "Failed to start LocalStack container")
 	require.NotNil(tb, localstackContainer, "LocalStack container is nil")
 
-	endpoint, err := localstackContainer.Endpoint(ctx, "4566/tcp")
-	require.NoError(tb, err, "Failed to get LocalStack endpoint")
+	host, err := localstackContainer.Host(ctx)
+	require.NoError(tb, err, "Failed to get LocalStack host")
+
+	port, err := localstackContainer.MappedPort(ctx, "4566/tcp")
+	require.NoError(tb, err, "Failed to get LocalStack S3 mapped port")
+
+	endpoint := fmt.Sprintf("%s:%s", host, port.Port())
 
 	// Fixed credentials for LocalStack
 	accessKeyID := "test"
@@ -56,7 +63,7 @@ func setupS3Container(tb testing.TB, ctx context.Context) (testcontainers.Contai
 	region := "us-east-1"
 	bucketName := "test-bucket"
 
-	s3Config := &S3Config{
+	s3Config := &Config{
 		EndpointURL:      endpoint,
 		Region:           region,
 		BucketName:       bucketName,
@@ -66,24 +73,29 @@ func setupS3Container(tb testing.TB, ctx context.Context) (testcontainers.Contai
 		S3ForcePathStyle: true, // Required for LocalStack
 	}
 
-	// Create the bucket in LocalStack
-	customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-		return aws.Endpoint{
-			URI:                s3Config.EndpointURL,
-			HostnameImmutable:  true,
-			Source:             aws.EndpointSourceCustom,
-			URL:                s3Config.EndpointURL,
-			SigningRegion:      region,
-			SigningName:        "s3",
-			DisableHTTPS:       s3Config.DisableSSL,
-			SourceFromHostname: true,
-		}, nil
-	})
+	// Determine the scheme for the endpoint URL
+	// We no longer need to parse and reconstruct. We just append the scheme directly.
+	var s3EndpointURL string
+	if s3Config.DisableSSL {
+		s3EndpointURL = fmt.Sprintf("http://%s", endpoint)
+	} else {
+		s3EndpointURL = fmt.Sprintf("https://%s", endpoint)
+	}
+	s3Config.EndpointURL = s3EndpointURL
 
-	awsCfg, err := config.LoadDefaultAWSConfig(ctx,
+	// Create the bucket in LocalStack
+	awsCfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion(s3Config.Region),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(s3Config.AccessKeyID, s3Config.SecretAccessKey, "")),
-		config.WithEndpointResolverWithOptions(customResolver),
+		config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+			return aws.Endpoint{
+				URL:               s3Config.EndpointURL,
+				HostnameImmutable: true,
+				Source:            aws.EndpointSourceCustom,
+				SigningRegion:     region,
+				SigningName:       "s3",
+			}, nil
+		})),
 	)
 	require.NoError(tb, err, "Failed to load AWS config for bucket creation")
 
