@@ -89,26 +89,26 @@ func newMockAMQPChannel() *mockAMQPChannel {
 	return &mockAMQPChannel{}
 }
 
-func (m *mockAMQPChannel) Confirm(noWait bool) error {
+func (m *mockAMQPChannel) Confirm(bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.confirmErr
 }
 
-func (m *mockAMQPChannel) Publish(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) error {
+func (m *mockAMQPChannel) Publish(string, string, bool, bool, amqp.Publishing) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.publishCount++
 	return m.publishErr
 }
 
-func (m *mockAMQPChannel) PublishWithDeferredConfirm(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) (*amqp.DeferredConfirmation, error) {
+func (m *mockAMQPChannel) PublishWithDeferredConfirm(string, string, bool, bool, amqp.Publishing) (*amqp.DeferredConfirmation, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return nil, m.publishErr
 }
 
-func (m *mockAMQPChannel) PublishWithContext(ctx context.Context, exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) error {
+func (m *mockAMQPChannel) PublishWithContext(context.Context, string, string, bool, bool, amqp.Publishing) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.publishCount++ // Increment publish count for this method as well
@@ -149,7 +149,7 @@ func setupRabbitMQ(ctx context.Context) (*rabbitmq.RabbitMQContainer, string, er
 		rabbitmq.WithAdminPassword("guest"),
 		testcontainers.WithImage("rabbitmq:3.12.11-management-alpine"),
 	)
-	if err != nil {
+	if err != nil || rabbitmqContainer == nil {
 		return nil, "", fmt.Errorf("failed to start RabbitMQ container: %w", err)
 	}
 
