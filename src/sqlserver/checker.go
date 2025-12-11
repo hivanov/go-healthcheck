@@ -1,0 +1,398 @@
+package sqlserver
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"healthcheck/core" // *** THIS MUST STAY ***
+	"log"
+	"sync"
+	"time"
+
+	_ "github.com/microsoft/go-mssqldb" // Microsoft SQL Server driver
+)
+
+// dbConnection interface for mocking *sql.DB in tests.
+type dbConnection interface {
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) rowScanner
+	Close() error
+}
+
+// rowScanner interface for mocking *sql.Row in tests.
+type rowScanner interface {
+	Scan(dest ...interface{}) error
+}
+
+// realDBConnection implements dbConnection for *sql.DB.
+type realDBConnection struct {
+	db *sql.DB
+}
+
+// realRowScanner implements rowScanner for *sql.Row.
+type realRowScanner struct {
+	row *sql.Row
+}
+
+func (r *realRowScanner) Scan(dest ...interface{}) error {
+	return r.row.Scan(dest...)
+}
+
+func (r *realDBConnection) QueryRowContext(ctx context.Context, query string, args ...interface{}) rowScanner {
+	return &realRowScanner{row: r.db.QueryRowContext(ctx, query, args...)}
+}
+
+func (r *realDBConnection) Close() error {
+	return r.db.Close()
+}
+
+type sqlServerChecker struct {
+	checkInterval    time.Duration
+	queryTimeout     time.Duration // New field for query timeout
+	connectionString string
+	db               dbConnection // Changed from *sql.DB
+	descriptor       core.Descriptor
+	currentStatus    core.ComponentStatus
+	statusChangeChan chan core.ComponentStatus
+	quit             chan struct{}
+	mutex            sync.RWMutex
+	cancelFunc       context.CancelFunc
+	ctx              context.Context
+	disabled         bool
+	wg               sync.WaitGroup // Add WaitGroup to wait for goroutines
+}
+
+// OpenDBFunc defines the signature for a function that can open a database connection.
+// This is used to allow mocking of sql.Open in tests.
+type OpenDBFunc func(driverName, connectionString string) (dbConnection, error)
+
+// newSQLDBConnection is a helper function to create a real dbConnection from *sql.DB
+// This will be the default OpenDBFunc used by NewSQLServerChecker.
+func newSQLDBConnection(driverName, connectionString string) (dbConnection, error) {
+	db, err := sql.Open(driverName, connectionString)
+	if err != nil {
+		return nil, err
+	}
+	return &realDBConnection{db: db}, nil
+}
+
+// NewSQLServerChecker creates a new Microsoft SQL Server health checker component.
+// It continuously pings the database with "SELECT 1" and updates its status.
+// This is the public constructor that handles opening the SQL DB connection.
+func NewSQLServerChecker(descriptor core.Descriptor, checkInterval, queryTimeout time.Duration, connectionString string) core.Component {
+	return NewSQLServerCheckerWithOpenDBFunc(descriptor, checkInterval, queryTimeout, connectionString, newSQLDBConnection)
+}
+
+// NewSQLServerCheckerWithOpenDBFunc creates a new Microsoft SQL Server health checker component,
+// allowing a custom OpenDBFunc to be provided for opening the database connection.
+// This is useful for testing scenarios where mocking the database connection is required.
+func NewSQLServerCheckerWithOpenDBFunc(descriptor core.Descriptor, checkInterval, queryTimeout time.Duration, connectionString string, openDB OpenDBFunc) core.Component {
+	dbConn, err := openDB("sqlserver", connectionString) // Use the provided OpenDBFunc
+	if err != nil {
+		dummyChecker := &sqlServerChecker{
+			descriptor: descriptor,
+			currentStatus: core.ComponentStatus{
+				Status: core.StatusFail,
+				Output: fmt.Sprintf("Failed to open DB connection: %v", err),
+			},
+			statusChangeChan: make(chan core.ComponentStatus, 5), // Increased buffer size
+			quit:             make(chan struct{}),
+			ctx:              context.Background(),
+			cancelFunc:       func() {},
+			disabled:         false,
+		}
+		return dummyChecker
+	}
+
+	return newSQLServerCheckerInternal(descriptor, checkInterval, queryTimeout, dbConn)
+}
+
+// newSQLServerCheckerInternal creates a new Microsoft SQL Server health checker component with a provided dbConnection.
+// It continuously pings the database with "SELECT 1" and updates its status.
+// This is an internal constructor used for testing purposes and for injecting a dbConnection.
+func newSQLServerCheckerInternal(descriptor core.Descriptor, checkInterval, queryTimeout time.Duration, conn dbConnection) core.Component {
+	ctx, cancelFunc := context.WithCancel(context.Background())
+
+	// Initial status is initializing
+	initialStatus := core.ComponentStatus{
+		Status: core.StatusWarn,
+		Output: "Microsoft SQL Server checker initializing...",
+	}
+
+	checker := &sqlServerChecker{
+		checkInterval:    checkInterval,
+		queryTimeout:     queryTimeout, // Initialize queryTimeout
+		connectionString: "",           // Not applicable when dbConnection is provided directly
+		descriptor:       descriptor,
+		currentStatus:    initialStatus,
+		statusChangeChan: make(chan core.ComponentStatus, 5), // Buffered to prevent blocking
+		quit:             make(chan struct{}),
+		ctx:              ctx,
+		cancelFunc:       cancelFunc,
+		disabled:         false,
+		db:               conn, // Use the provided dbConnection
+	}
+	checker.wg.Add(1) // Increment WaitGroup counter
+	// If a connection is provided, start the health check loop.
+	// In this internal constructor, we assume the dbConnection is already valid or will be handled by the caller.
+	// Any error handling for dbConnection opening is expected to be done before calling this function.
+	go checker.startHealthCheckLoop()
+
+	return checker
+}
+
+// Close stops the checker's background operations and closes the database connection.
+func (p *sqlServerChecker) Close() error {
+	// Acquire mutex only for signaling, then release before waiting
+	p.mutex.Lock()
+	p.cancelFunc()   // Signal context cancellation to stop the loop
+	close(p.quit)    // Also signal the older quit channel if anything is listening
+	p.mutex.Unlock() // Release mutex here
+
+	p.wg.Wait() // Wait for the startHealthCheckLoop goroutine to finish
+
+	// After goroutine has finished and released its locks, now safely close status channel
+	p.mutex.Lock() // Re-acquire mutex to protect access to statusChangeChan if needed.
+	defer p.mutex.Unlock()
+	// Removed close(p.statusChangeChan) from here
+	return nil // p.db.Close() is now handled by the goroutine
+}
+
+// ChangeStatus updates the internal status of the component.
+// This might be used by an external orchestrator to temporarily override status.
+// Periodic checks will eventually re-evaluate and potentially overwrite this.
+func (p *sqlServerChecker) ChangeStatus(newStatus core.ComponentStatus) {
+	p.updateStatus(newStatus)
+}
+
+// Disable sets the component to a disabled state, halting active health checks.
+func (p *sqlServerChecker) Disable() {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	if !p.disabled {
+		p.disabled = true
+		p.currentStatus = core.ComponentStatus{
+			Status:            core.StatusWarn,
+			Time:              time.Now().UTC(),
+			Output:            "Microsoft SQL Server checker disabled",
+			AffectedEndpoints: nil,
+		}
+		select { // Non-blocking send
+		case p.statusChangeChan <- p.currentStatus:
+		default:
+		}
+	}
+}
+
+// Enable reactivates the component, resuming active health checks.
+func (p *sqlServerChecker) Enable() {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	if p.disabled {
+		p.disabled = false
+		p.currentStatus = core.ComponentStatus{
+			Status: core.StatusWarn,
+			Output: "Microsoft SQL Server checker enabled, re-initializing...",
+		}
+		select { // Non-blocking send
+		case p.statusChangeChan <- p.currentStatus:
+		default:
+		}
+		// Removed go p.performHealthCheck() as the main loop will handle the re-check
+	}
+}
+
+// Status returns the current health status of the Microsoft SQL Server component.
+func (p *sqlServerChecker) Status() core.ComponentStatus {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+	return p.currentStatus
+}
+
+// Descriptor returns the descriptor for the Microsoft SQL Server component.
+func (p *sqlServerChecker) Descriptor() core.Descriptor {
+	return p.descriptor
+}
+
+// StatusChange returns a channel that sends updates whenever the component's status changes.
+func (p *sqlServerChecker) StatusChange() <-chan core.ComponentStatus {
+	return p.statusChangeChan
+}
+
+// Health returns a detailed health report for the Microsoft SQL Server component.
+func (p *sqlServerChecker) Health() core.ComponentHealth {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	var output string
+
+	if p.currentStatus.Output != "" {
+		output = p.currentStatus.Output
+	}
+
+	return core.ComponentHealth{
+		ComponentID:   p.descriptor.ComponentID,
+		ComponentType: p.descriptor.ComponentType,
+		Status:        p.currentStatus.Status,
+		Output:        output,
+	}
+}
+
+// startHealthCheckLoop runs in a goroutine, periodically checking the Microsoft SQL Server database health.
+func (p *sqlServerChecker) startHealthCheckLoop() {
+	defer p.wg.Done() // Decrement WaitGroup counter when goroutine exits
+	ticker := time.NewTicker(p.checkInterval)
+	defer ticker.Stop()
+	defer close(p.statusChangeChan) // Re-added defer close(p.statusChangeChan) here
+
+	// Removed initial p.performHealthCheck() to avoid race with Close() during initialization
+
+	for {
+		select {
+		case <-ticker.C:
+			// Check if already shutting down
+			select {
+			case <-p.ctx.Done(): // Check context done before potentially starting a check
+				return // Already shutting down, exit
+			default:
+				// Not yet done, proceed with disabled check
+			}
+
+			p.mutex.RLock()
+			isDisabled := p.disabled
+			p.mutex.RUnlock()
+			if isDisabled {
+				continue // Skip check if disabled
+			}
+			p.performHealthCheck()
+		case <-p.quit: // Explicit quit signal
+			// Close DB here
+			if p.db != nil {
+				if err := p.db.Close(); err != nil {
+					log.Printf("Error closing Microsoft SQL Server connection on quit: %v", err)
+				}
+			}
+			return
+		case <-p.ctx.Done(): // Context cancellation signal
+			// Close DB here
+			if p.db != nil {
+				if err := p.db.Close(); err != nil {
+					log.Printf("Error closing Microsoft SQL Server connection on context done: %v", err)
+				}
+			}
+			return
+		}
+	}
+}
+
+// performHealthCheck executes a "SELECT 1" query against the Microsoft SQL Server database
+// and updates the component's status based on the result.
+func (p *sqlServerChecker) performHealthCheck() {
+	// Check if context is already cancelled (i.e., shutting down).
+	// This prevents sending updates if the checker is already on its way out.
+	select {
+	case <-p.ctx.Done():
+		return // Already shutting down, do not perform check or update status
+	default:
+		// Not shutting down, proceed.
+	}
+
+	p.mutex.RLock()
+	isDisabled := p.disabled
+	p.mutex.RUnlock()
+
+	if isDisabled {
+		// If disabled, we should not perform active checks.
+		// The status was already set to "disabled" by the Disable method.
+		return
+	}
+
+	if p.db == nil {
+		p.updateStatus(core.ComponentStatus{
+			Status: core.StatusFail,
+			Output: "Database connection object is nil",
+		})
+		return
+	}
+
+	// Create a new context with a timeout for the health check query.
+	// This ensures that if the database is unresponsive, the check doesn't hang forever.
+	checkCtx, checkCancel := context.WithTimeout(p.ctx, p.queryTimeout)
+	defer checkCancel()
+
+	type queryResult struct {
+		val int
+		err error
+	}
+	resultChan := make(chan queryResult, 1)
+
+	startTime := time.Now()
+	go func() {
+		var val int
+		row := p.db.QueryRowContext(checkCtx, "SELECT 1")
+		err := row.Scan(&val)
+		resultChan <- queryResult{val: val, err: err}
+	}()
+
+	var result int
+	var err error
+	select {
+	case res := <-resultChan:
+		result = res.val
+		err = res.err
+	case <-checkCtx.Done(): // Context cancelled (either timeout or parent ctx cancellation)
+		err = checkCtx.Err() // Should be context.DeadlineExceeded or context.Canceled
+	}
+	elapsedTime := time.Since(startTime)
+
+	if err != nil {
+		p.updateStatus(core.ComponentStatus{
+			Status:        core.StatusFail,
+			Output:        fmt.Sprintf("Microsoft SQL Server health check query failed: %v", err),
+			Time:          startTime,
+			ObservedValue: elapsedTime.Seconds(),
+			ObservedUnit:  "s",
+		})
+	} else if result == 1 {
+		p.updateStatus(core.ComponentStatus{
+			Status:        core.StatusPass,
+			Output:        "Microsoft SQL Server is healthy",
+			Time:          startTime,
+			ObservedValue: elapsedTime.Seconds(),
+			ObservedUnit:  "s",
+		})
+	} else {
+		p.updateStatus(core.ComponentStatus{
+			Status:        core.StatusFail,
+			Output:        fmt.Sprintf("Microsoft SQL Server health check query returned unexpected result: %d (expected 1)", result),
+			Time:          startTime,
+			ObservedValue: elapsedTime.Seconds,
+			ObservedUnit:  "s",
+		})
+	}
+}
+
+// updateStatus safely updates the current status and notifies listeners if the status has changed.
+func (p *sqlServerChecker) updateStatus(newStatus core.ComponentStatus) {
+	// Check if context is already cancelled (i.e., shutting down).
+	// If so, we should not send any more status updates.
+	select {
+	case <-p.ctx.Done():
+		return // Shutting down, do not send status
+	default:
+		// Not shutting down, proceed.
+	}
+
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if p.currentStatus.Status != newStatus.Status || p.currentStatus.Output != newStatus.Output {
+		p.currentStatus = newStatus
+		select {
+		case p.statusChangeChan <- newStatus:
+		default:
+			// Non-blocking send: if the channel buffer is full,
+			// it means no one is listening fast enough or the buffer is too small.
+			// This prevents blocking the health check loop itself.
+		}
+	}
+}
