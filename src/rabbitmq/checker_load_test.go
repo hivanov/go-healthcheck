@@ -16,7 +16,7 @@ import (
 
 // BenchmarkRabbitMQHealthCheck measures the performance of the Health() method.
 func BenchmarkRabbitMQHealthCheck(b *testing.B) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(b.Context(), defaultTestTimeout)
 	defer cancel()
 
 	rabbitmqContainer, amqpURL, err := setupRabbitMQ(ctx)
@@ -59,7 +59,7 @@ func BenchmarkRabbitMQHealthCheck(b *testing.B) {
 		if status.Status != core.StatusPass {
 			b.Fatalf("Initial health check did not pass, status: %v", status)
 		}
-	case <-time.After(10 * time.Second): // Give it some time
+	case <-time.After(defaultTestTimeout): // Give it some time
 		b.Fatal("Timed out waiting for initial health check to pass")
 	}
 

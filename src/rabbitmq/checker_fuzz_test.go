@@ -1,6 +1,7 @@
 package rabbitmq
 
 import (
+	"context"
 	"healthcheck/core"
 	"net/url"
 	"sync" // Import sync package
@@ -37,6 +38,13 @@ func (m *MockAMQPChannel) PublishWithDeferredConfirm(exchange, routingKey string
 		return nil, assert.AnError
 	}
 	return &amqp.DeferredConfirmation{}, nil
+}
+
+func (m *MockAMQPChannel) PublishWithContext(ctx context.Context, exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) error {
+	if m.failPublish {
+		return assert.AnError
+	}
+	return nil
 }
 
 func (m *MockAMQPChannel) Close() error {

@@ -39,15 +39,12 @@ go work sync
 Here's a basic example of how to use the RabbitMQ health checker:
 
 ```go
-package main
-
 import (
 	"context"
 	"fmt"
 	"healthcheck/core"
-	"healthcheck/rabbitmq"
 	"log"
-	time
+	"time"
 )
 
 func main() {
@@ -60,8 +57,8 @@ func main() {
 	// Replace with your RabbitMQ connection string
 	connectionString := "amqp://guest:guest@localhost:5672/"
 
-	// Create a new RabbitMQ checker that checks every 5 seconds
-	checker := rabbitmq.NewRabbitMQChecker(descriptor, 5*time.Second, connectionString)
+	// Create a new RabbitMQ checker that checks every 5 seconds with a 1-second operation timeout
+	checker := rabbitmq.NewRabbitMQChecker(descriptor, 5*time.Second, 1*time.Second, connectionString)
 	defer func() {
 		if err := checker.Close(); err != nil {
 			log.Printf("Error closing RabbitMQ checker: %v", err)

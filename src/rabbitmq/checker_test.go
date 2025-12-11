@@ -8,12 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // TestRabbitMQHealthCheck_Pass verifies that the health check passes when RabbitMQ is healthy.
 func TestRabbitMQHealthCheck_Pass(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(t.Context(), defaultTestTimeout)
+	defer cancel()
 	rabbitmqContainer, amqpURL, err := setupRabbitMQ(ctx)
 	require.NoError(t, err)
 	defer func() {
@@ -31,12 +33,12 @@ func TestRabbitMQHealthCheck_Pass(t *testing.T) {
 	checker := NewRabbitMQChecker(descriptor, 1*time.Second, 1*time.Second, amqpURL)
 	defer func() {
 		if err := checker.Close(); err != nil {
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}
 	}()
 
-	// Give the checker some time to perform initial checks
-	time.Sleep(2 * time.Second)
+	// Wait for the checker to report a PASS status
+	waitForStatus(t, checker, core.StatusPass, defaultTestTimeout)
 
 	status := checker.Status()
 	require.Equal(t, core.StatusPass, status.Status, "Expected status to be PASS")
@@ -61,12 +63,12 @@ func TestRabbitMQHealthCheck_Fail(t *testing.T) {
 	checker := NewRabbitMQChecker(descriptor, 1*time.Second, 1*time.Second, badAmqpURL)
 	defer func() {
 		if err := checker.Close(); err != nil {
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}
 	}()
 
-	// Give the checker some time to perform initial checks
-	time.Sleep(2 * time.Second)
+	// Wait for the checker to report a FAIL status
+	waitForStatus(t, checker, core.StatusFail, defaultTestTimeout)
 
 	status := checker.Status()
 	require.Equal(t, core.StatusFail, status.Status, "Expected status to be FAIL")
@@ -79,7 +81,8 @@ func TestRabbitMQHealthCheck_Fail(t *testing.T) {
 
 // TestRabbitMQHealthCheck_Close verifies that closing the checker works correctly.
 func TestRabbitMQHealthCheck_Close(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(t.Context(), defaultTestTimeout)
+	defer cancel()
 	rabbitmqContainer, amqpURL, err := setupRabbitMQ(ctx)
 	require.NoError(t, err)
 	defer func() {
@@ -95,9 +98,8 @@ func TestRabbitMQHealthCheck_Close(t *testing.T) {
 	}
 
 	checker := NewRabbitMQChecker(descriptor, 1*time.Second, 1*time.Second, amqpURL)
-
-	// Give the checker some time to start
-	time.Sleep(500 * time.Millisecond)
+	// Wait for the checker to start and report a PASS status
+	waitForStatus(t, checker, core.StatusPass, defaultTestTimeout)
 
 	err = checker.Close()
 	require.NoError(t, err, "Expected no error when closing the checker")
@@ -109,7 +111,8 @@ func TestRabbitMQHealthCheck_Close(t *testing.T) {
 
 // TestRabbitMQHealthCheck_ChangeStatus verifies ChangeStatus method.
 func TestRabbitMQHealthCheck_ChangeStatus(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(t.Context(), defaultTestTimeout)
+	defer cancel()
 	rabbitmqContainer, amqpURL, err := setupRabbitMQ(ctx)
 	require.NoError(t, err)
 	defer func() {
@@ -127,18 +130,25 @@ func TestRabbitMQHealthCheck_ChangeStatus(t *testing.T) {
 	checker := NewRabbitMQChecker(descriptor, 1*time.Minute, 1*time.Second, amqpURL) // Long interval to prevent auto-updates
 	defer func() {
 		if err := checker.Close(); err != nil {
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}
 	}()
 
 	initialStatus := checker.Status()
 	require.Equal(t, core.StatusWarn, initialStatus.Status, "Expected initial status to be WARN")
 
+	// Wait for the initial WARN status to be observed in the background loop
+	// (though this is already the initial status set by the checker)
+	waitForStatus(t, checker, core.StatusWarn, defaultTestTimeout)
+
 	newStatus := core.ComponentStatus{
 		Status: core.StatusFail,
 		Output: "Manually set to critical",
 	}
 	checker.ChangeStatus(newStatus)
+
+	// Wait for the manually changed status to propagate and be reflected
+	waitForStatus(t, checker, core.StatusFail, defaultTestTimeout)
 
 	changedStatus := checker.Status()
 	require.Equal(t, core.StatusFail, changedStatus.Status, "Expected status to be CRIT after change")
@@ -147,7 +157,8 @@ func TestRabbitMQHealthCheck_ChangeStatus(t *testing.T) {
 
 // TestRabbitMQHealthCheck_DisableEnable verifies Disable and Enable methods.
 func TestRabbitMQHealthCheck_DisableEnable(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(t.Context(), defaultTestTimeout)
+	defer cancel()
 	rabbitmqContainer, amqpURL, err := setupRabbitMQ(ctx)
 	require.NoError(t, err)
 	defer func() {
@@ -165,7 +176,7 @@ func TestRabbitMQHealthCheck_DisableEnable(t *testing.T) {
 	checker := NewRabbitMQChecker(descriptor, 1*time.Second, 1*time.Second, amqpURL)
 	defer func() {
 		if err := checker.Close(); err != nil {
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}
 	}()
 
@@ -180,7 +191,7 @@ func TestRabbitMQHealthCheck_DisableEnable(t *testing.T) {
 	case initialStatus = <-statusChan:
 		// We might get WARN first, or PASS directly if the check is fast
 		require.True(t, initialStatus.Status == core.StatusWarn || initialStatus.Status == core.StatusPass, "Expected initial status from channel to be WARN or PASS")
-	case <-time.After(5 * time.Second):
+	case <-time.After(defaultTestTimeout):
 		t.Fatal("Timeout waiting for initial status update")
 	}
 
@@ -189,7 +200,7 @@ func TestRabbitMQHealthCheck_DisableEnable(t *testing.T) {
 		select {
 		case status := <-statusChan:
 			require.Equal(t, core.StatusPass, status.Status, "Expected PASS status from channel after initial WARN")
-		case <-time.After(5 * time.Second):
+		case <-time.After(defaultTestTimeout):
 			t.Fatal("Timeout waiting for PASS status after initial WARN")
 		}
 	} else {
@@ -203,7 +214,7 @@ func TestRabbitMQHealthCheck_DisableEnable(t *testing.T) {
 	case status := <-statusChan:
 		require.Equal(t, core.StatusWarn, status.Status, "Expected WARN status from channel after Disable")
 		require.Contains(t, status.Output, "RabbitMQ checker disabled", "Expected output to indicate disabled state")
-	case <-time.After(5 * time.Second):
+	case <-time.After(defaultTestTimeout):
 		t.Fatal("Timeout waiting for WARN status from channel after Disable")
 	}
 
@@ -213,7 +224,7 @@ func TestRabbitMQHealthCheck_DisableEnable(t *testing.T) {
 	case status := <-statusChan:
 		require.Equal(t, core.StatusWarn, status.Status, "Expected WARN status from channel after Enable")
 		require.Contains(t, status.Output, "RabbitMQ checker enabled, re-initializing...", "Expected output to indicate enabled state")
-	case <-time.After(5 * time.Second):
+	case <-time.After(defaultTestTimeout):
 		t.Fatal("Timeout waiting for WARN status from channel after Enable")
 	}
 
@@ -221,14 +232,15 @@ func TestRabbitMQHealthCheck_DisableEnable(t *testing.T) {
 	select {
 	case status := <-statusChan:
 		require.Equal(t, core.StatusPass, status.Status, "Expected PASS status from channel after re-enable check")
-	case <-time.After(5 * time.Second):
+	case <-time.After(defaultTestTimeout):
 		t.Fatal("Timeout waiting for PASS status from channel after re-enable check")
 	}
 }
 
 // TestRabbitMQHealthCheck_StatusChangeChannel verifies that the status change channel works.
 func TestRabbitMQHealthCheck_StatusChangeChannel(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(t.Context(), defaultTestTimeout)
+	defer cancel()
 	rabbitmqContainer, amqpURL, err := setupRabbitMQ(ctx)
 	require.NoError(t, err)
 	defer func() {
@@ -246,7 +258,7 @@ func TestRabbitMQHealthCheck_StatusChangeChannel(t *testing.T) {
 	checker := NewRabbitMQChecker(descriptor, 1*time.Second, 1*time.Second, amqpURL)
 	defer func() {
 		if err := checker.Close(); err != nil {
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}
 	}()
 
@@ -261,7 +273,7 @@ func TestRabbitMQHealthCheck_StatusChangeChannel(t *testing.T) {
 	case initialStatus = <-statusChan:
 		// We might get WARN first, or PASS directly if the check is fast
 		require.True(t, initialStatus.Status == core.StatusWarn || initialStatus.Status == core.StatusPass, "Expected initial status from channel to be WARN or PASS")
-	case <-time.After(5 * time.Second):
+	case <-time.After(defaultTestTimeout):
 		t.Fatal("Timeout waiting for initial status update")
 	}
 
@@ -270,7 +282,7 @@ func TestRabbitMQHealthCheck_StatusChangeChannel(t *testing.T) {
 		select {
 		case status := <-statusChan:
 			require.Equal(t, core.StatusPass, status.Status, "Expected PASS status from channel after initial WARN")
-		case <-time.After(5 * time.Second):
+		case <-time.After(defaultTestTimeout):
 			t.Fatal("Timeout waiting for PASS status after initial WARN")
 		}
 	} else {
@@ -284,7 +296,7 @@ func TestRabbitMQHealthCheck_StatusChangeChannel(t *testing.T) {
 	select {
 	case status := <-statusChan:
 		require.Equal(t, core.StatusFail, status.Status, "Expected FAIL status from channel after ChangeStatus")
-	case <-time.After(5 * time.Second):
+	case <-time.After(defaultTestTimeout):
 		t.Fatal("Timeout waiting for FAIL status from channel")
 	}
 }
@@ -314,8 +326,8 @@ func TestRabbitMQHealthCheck_ConnectionCloseError(t *testing.T) {
 	checker := newRabbitMQCheckerInternal(descriptor, 10*time.Millisecond, 20*time.Millisecond, mockConn) // Short interval for quick check
 	// Removed defer checker.Close() to prevent double close of quit channel
 
-	// Give it some time to run a check and then close
-	time.Sleep(50 * time.Millisecond)
+	// Wait for an initial health check to pass before attempting to close
+	waitForStatus(t, checker, core.StatusPass, defaultTestTimeout)
 	err := checker.Close()
 	require.Error(t, err) // Checker.Close should return error from underlying connection close
 	require.Contains(t, err.Error(), "mock connection close error")
@@ -337,7 +349,8 @@ func TestRabbitMQHealthCheck_ChannelOpenError(t *testing.T) {
 		_ = checker.Close()
 	}()
 
-	time.Sleep(50 * time.Millisecond) // Give it time to perform a check
+	// Wait for a health check to report failure due to channel open error
+	waitForStatus(t, checker, core.StatusFail, defaultTestTimeout)
 
 	status := checker.Status()
 	require.Equal(t, core.StatusFail, status.Status)
@@ -361,7 +374,8 @@ func TestRabbitMQHealthCheck_ChannelCloseError(t *testing.T) {
 		_ = checker.Close()
 	}()
 
-	time.Sleep(50 * time.Millisecond) // Give it time to perform a check
+	// Wait for a health check to pass, even if channel close errors (it's logged, not a failure of check itself)
+	waitForStatus(t, checker, core.StatusPass, defaultTestTimeout)
 
 	// The error from channel.Close() is logged, not returned by performHealthCheck,
 	// so the checker's status should still be PASS if publish was successful.
@@ -387,7 +401,8 @@ func TestRabbitMQHealthCheck_PublishError(t *testing.T) {
 		_ = checker.Close()
 	}()
 
-	time.Sleep(50 * time.Millisecond) // Give it time to perform a check
+	// Wait for a health check to report failure due to publish error
+	waitForStatus(t, checker, core.StatusFail, defaultTestTimeout)
 
 	status := checker.Status()
 	require.Equal(t, core.StatusFail, status.Status)

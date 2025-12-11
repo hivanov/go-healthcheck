@@ -74,6 +74,8 @@ Always add fuzz tests.
 Never assume the code works correctly. Do test extensively with `go test -race` and appropriate tests.
 Never assume code coverage. Do test extensively with `go test -cover`.
 Never allow tests to run forever. Add sensible time limits to all operations.
+Never let a test run for more than 2 minutes. Always embed the test time limits in the setup routines.
+Never use `context.Background()`. Always use a context with a timeout, which derives from `t.Context()`.
 
 
 # Factory Function Rules

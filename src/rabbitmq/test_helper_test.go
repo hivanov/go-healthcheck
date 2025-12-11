@@ -4,16 +4,16 @@ import (
 	"context"
 	"fmt"
 	"healthcheck/core"
-	"log"
 	"sync"
 	"testing"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
-	"github.com/stretchr/testify/assert"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/rabbitmq"
 )
+
+const defaultTestTimeout = 2 * time.Minute
 
 // mockAMQPConnection implements amqpConnection for testing purposes.
 type mockAMQPConnection struct {
@@ -106,6 +106,13 @@ func (m *mockAMQPChannel) PublishWithDeferredConfirm(exchange, routingKey string
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return nil, m.publishErr
+}
+
+func (m *mockAMQPChannel) PublishWithContext(ctx context.Context, exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.publishCount++ // Increment publish count for this method as well
+	return m.publishErr
 }
 
 func (m *mockAMQPChannel) Close() error {

@@ -23,6 +23,7 @@ type amqpChannel interface {
 	Confirm(noWait bool) error
 	Publish(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) error
 	PublishWithDeferredConfirm(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) (*amqp.DeferredConfirmation, error)
+	PublishWithContext(ctx context.Context, exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) error
 	Close() error
 }
 
@@ -64,6 +65,10 @@ func (r *realAMQPChannel) PublishWithDeferredConfirm(exchange, routingKey string
 	return r.ch.PublishWithDeferredConfirm(exchange, routingKey, mandatory, immediate, msg)
 }
 
+func (r *realAMQPChannel) PublishWithContext(ctx context.Context, exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) error {
+	return r.ch.PublishWithContext(ctx, exchange, routingKey, mandatory, immediate, msg)
+}
+
 func (r *realAMQPChannel) Close() error {
 	return r.ch.Close()
 }
@@ -77,10 +82,12 @@ type rabbitMQChecker struct {
 	currentStatus     core.ComponentStatus
 	statusChangeChan  chan core.ComponentStatus
 	quit              chan struct{}
+	triggerCheck      chan struct{} // New channel to trigger immediate checks
 	mutex             sync.RWMutex
 	cancelFunc        context.CancelFunc
 	ctx               context.Context
 	disabled          bool
+	wg                sync.WaitGroup // Add WaitGroup for graceful goroutine shutdown
 }
 
 // OpenAMQPFunc defines the signature for a function that can open a RabbitMQ connection.
@@ -116,6 +123,7 @@ func NewRabbitMQCheckerWithOpenAMQPFunc(descriptor core.Descriptor, checkInterva
 			},
 			statusChangeChan: make(chan core.ComponentStatus, 1),
 			quit:             make(chan struct{}),
+			triggerCheck:     make(chan struct{}, 1), // Initialize new channel
 			ctx:              context.Background(),
 			cancelFunc:       func() {},
 			disabled:         false,
@@ -144,12 +152,14 @@ func newRabbitMQCheckerInternal(descriptor core.Descriptor, checkInterval, opera
 		currentStatus:     initialStatus,
 		statusChangeChan:  make(chan core.ComponentStatus, 1),
 		quit:              make(chan struct{}),
+		triggerCheck:      make(chan struct{}, 1), // Initialize new channel
 		ctx:               ctx,
 		cancelFunc:        cancelFunc,
 		disabled:          false,
 		conn:              conn,
 	}
 
+	checker.wg.Add(1) // Add 1 to WaitGroup counter before starting goroutine
 	go checker.startHealthCheckLoop()
 
 	return checker
@@ -157,11 +167,19 @@ func newRabbitMQCheckerInternal(descriptor core.Descriptor, checkInterval, opera
 
 // Close stops the checker's background operations and closes the RabbitMQ connection.
 func (r *rabbitMQChecker) Close() error {
+	// Signal to stop *without* holding the main mutex for too long
+	r.cancelFunc()
+	close(r.quit)
+	close(r.triggerCheck) // Close the new trigger channel
+
+	r.wg.Wait() // Wait for startHealthCheckLoop to finish. No mutex held here.
+
+	// Now that startHealthCheckLoop has definitely exited, it's safe to acquire the mutex for final cleanup.
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	r.cancelFunc()
-	close(r.quit)
+	// After the health check loop has exited, it is safe to close the channel.
+	close(r.statusChangeChan)
 
 	if r.conn != nil {
 		return r.conn.Close()
@@ -207,7 +225,12 @@ func (r *rabbitMQChecker) Enable() {
 		case r.statusChangeChan <- r.currentStatus:
 		default:
 		}
-		go r.performHealthCheck()
+		// Trigger an immediate check via the main loop
+		select {
+		case r.triggerCheck <- struct{}{}:
+		default:
+			// Non-blocking send, if the channel is full or closed, don't block
+		}
 	}
 }
 
@@ -249,29 +272,35 @@ func (r *rabbitMQChecker) Health() core.ComponentHealth {
 
 // startHealthCheckLoop runs in a goroutine, periodically checking the RabbitMQ health.
 func (r *rabbitMQChecker) startHealthCheckLoop() {
-	ticker := time.NewTicker(r.checkInterval)
-	defer ticker.Stop()
+	defer r.wg.Done() // Decrement WaitGroup counter when goroutine exits
 
-	r.performHealthCheck()
+	ticker := time.NewTicker(r.checkInterval)
+	defer ticker.Stop() // Keep defer for general case
+
+	// Initial check
+	select {
+	case <-r.ctx.Done():
+		return // Do not perform initial check if already cancelled
+	default:
+		r.performHealthCheck()
+	}
 
 	for {
 		select {
 		case <-ticker.C:
+			// Check context before performing health check
+			select {
+			case <-r.ctx.Done():
+				return // Context cancelled while waiting for ticker
+			default:
+				r.performHealthCheck()
+			}
+		case <-r.triggerCheck: // New case to handle immediate check triggers
 			r.performHealthCheck()
 		case <-r.quit:
-			if r.conn != nil && !r.conn.IsClosed() {
-				if err := r.conn.Close(); err != nil {
-					log.Printf("Error closing RabbitMQ connection on quit: %v", err)
-				}
-			}
-			return
+			return // Quit signal received
 		case <-r.ctx.Done():
-			if r.conn != nil && !r.conn.IsClosed() {
-				if err := r.conn.Close(); err != nil {
-					log.Printf("Error closing RabbitMQ connection on context done: %v", err)
-				}
-			}
-			return
+			return // Context cancelled
 		}
 	}
 }
@@ -280,13 +309,17 @@ func (r *rabbitMQChecker) startHealthCheckLoop() {
 func (r *rabbitMQChecker) performHealthCheck() {
 	r.mutex.RLock()
 	isDisabled := r.disabled
+	// Capture the connection pointer under RLock to prevent it from being nilled concurrently by Close
+	currentConn := r.conn
+	currentCtx := r.ctx // Also capture ctx as it's used for opCtx
+	operationsTimeout := r.operationsTimeout
 	r.mutex.RUnlock()
 
-	if isDisabled {
+	if isDisabled { // Removed isClosing check here
 		return
 	}
 
-	if r.conn == nil || r.conn.IsClosed() {
+	if currentConn == nil || currentConn.IsClosed() { // Use captured conn
 		r.updateStatus(core.ComponentStatus{
 			Status: core.StatusFail,
 			Output: "RabbitMQ connection is closed or nil",
@@ -295,10 +328,11 @@ func (r *rabbitMQChecker) performHealthCheck() {
 	}
 
 	startTime := time.Now()
-	opCtx, cancelOp := context.WithTimeout(r.ctx, r.operationsTimeout)
+	// Use the captured currentCtx for opCtx derivation
+	opCtx, cancelOp := context.WithTimeout(currentCtx, operationsTimeout)
 	defer cancelOp()
 
-	channel, err := r.conn.Channel()
+	channel, err := currentConn.Channel() // Use captured conn
 	if err != nil {
 		r.updateStatus(core.ComponentStatus{
 			Status:        core.StatusFail,
