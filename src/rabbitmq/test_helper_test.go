@@ -33,7 +33,7 @@ func newMockAMQPConnection() *mockAMQPConnection {
 	}
 }
 
-func (m *mockAMQPConnection) Channel() (amqpChannel, error) {
+func (m *mockAMQPConnection) Channel() (AmqpChannel, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.channelErr != nil {
@@ -76,7 +76,7 @@ func (m *mockAMQPConnection) SetCloseError(err error) {
 	m.closeErr = err
 }
 
-// mockAMQPChannel implements amqpChannel for testing purposes.
+// mockAMQPChannel implements AmqpChannel for testing purposes.
 type mockAMQPChannel struct {
 	mu           sync.Mutex
 	publishErr   error

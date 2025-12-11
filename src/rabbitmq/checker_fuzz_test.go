@@ -19,28 +19,28 @@ type MockAMQPChannel struct {
 	closed      bool
 }
 
-func (m *MockAMQPChannel) Confirm(noWait bool) error {
+func (m *MockAMQPChannel) Confirm(bool) error {
 	if m.failConfirm {
 		return assert.AnError
 	}
 	return nil
 }
 
-func (m *MockAMQPChannel) Publish(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) error {
+func (m *MockAMQPChannel) Publish(string, string, bool, bool, amqp.Publishing) error {
 	if m.failPublish { // Assuming failPublish applies to Publish as well
 		return assert.AnError
 	}
 	return nil
 }
 
-func (m *MockAMQPChannel) PublishWithDeferredConfirm(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) (*amqp.DeferredConfirmation, error) {
+func (m *MockAMQPChannel) PublishWithDeferredConfirm(string, string, bool, bool, amqp.Publishing) (*amqp.DeferredConfirmation, error) {
 	if m.failPublish {
 		return nil, assert.AnError
 	}
 	return &amqp.DeferredConfirmation{}, nil
 }
 
-func (m *MockAMQPChannel) PublishWithContext(ctx context.Context, exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) error {
+func (m *MockAMQPChannel) PublishWithContext(context.Context, string, string, bool, bool, amqp.Publishing) error {
 	if m.failPublish {
 		return assert.AnError
 	}
@@ -61,7 +61,7 @@ type MockAMQPConnection struct {
 	closed        bool
 }
 
-func (m *MockAMQPConnection) Channel() (amqpChannel, error) { // Corrected return type
+func (m *MockAMQPConnection) Channel() (AmqpChannel, error) { // Corrected return type
 	if m.failChannel {
 		return nil, assert.AnError
 	}

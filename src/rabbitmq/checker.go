@@ -13,13 +13,13 @@ import (
 
 // connection interface for mocking *amqp.Connection in tests.
 type amqpConnection interface {
-	Channel() (amqpChannel, error)
+	Channel() (AmqpChannel, error)
 	Close() error
 	IsClosed() bool
 }
 
 // channel interface for mocking *amqp.Channel in tests.
-type amqpChannel interface {
+type AmqpChannel interface {
 	Confirm(noWait bool) error
 	Publish(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) error
 	PublishWithDeferredConfirm(exchange, routingKey string, mandatory, immediate bool, msg amqp.Publishing) (*amqp.DeferredConfirmation, error)
@@ -32,7 +32,7 @@ type realAMQPConnection struct {
 	conn *amqp.Connection
 }
 
-func (r *realAMQPConnection) Channel() (amqpChannel, error) { // Corrected return type
+func (r *realAMQPConnection) Channel() (AmqpChannel, error) { // Corrected return type
 	ch, err := r.conn.Channel()
 	if err != nil {
 		return nil, err
@@ -48,7 +48,7 @@ func (r *realAMQPConnection) IsClosed() bool {
 	return r.conn.IsClosed()
 }
 
-// realAMQPChannel implements amqpChannel for *amqp.Channel.
+// realAMQPChannel implements AmqpChannel for *amqp.Channel.
 type realAMQPChannel struct {
 	ch *amqp.Channel
 }
