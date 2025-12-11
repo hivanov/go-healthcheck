@@ -81,13 +81,13 @@ func FuzzPerformHealthCheck(f *testing.F) {
 // or the fuzz test would be in the same _test package.
 
 type mockVaultClient struct {
-	sysFunc        func() VaultSysInterface
+	sysFunc        func() SysInterface
 	closeFunc      func()
 	healthResponse *api.HealthResponse
 	healthError    error
 }
 
-func (m *mockVaultClient) Sys() VaultSysInterface {
+func (m *mockVaultClient) Sys() SysInterface {
 	if m.sysFunc != nil {
 		return m.sysFunc()
 	}

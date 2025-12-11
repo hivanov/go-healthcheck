@@ -6,18 +6,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hashicorp/vault/api"
 	"healthcheck/core"
+
+	"github.com/hashicorp/vault/api"
 )
 
-// vaultSysInterface defines the methods of *api.Sys used by the checker.
-type VaultSysInterface interface {
+// SysInterface defines the methods of *api.Sys used by the checker.
+type SysInterface interface {
 	Health() (*api.HealthResponse, error)
 }
 
-// vaultClient interface for mocking *api.Client in tests.
-type VaultClient interface {
-	Sys() VaultSysInterface // Now returns an interface
+// Client interface for mocking *api.Client in tests.
+type Client interface {
+	Sys() SysInterface // Now returns an interface
 	Close()
 }
 
@@ -26,7 +27,7 @@ type realVaultClient struct {
 	client *api.Client
 }
 
-func (r *realVaultClient) Sys() VaultSysInterface { // Now returns an interface
+func (r *realVaultClient) Sys() SysInterface { // Now returns an interface
 	return r.client.Sys()
 }
 
@@ -41,7 +42,7 @@ func (r *realVaultClient) Close() {
 type vaultChecker struct {
 	checkInterval    time.Duration
 	vaultConfig      *api.Config
-	client           VaultClient // Changed from *api.Client
+	client           Client // Changed from *api.Client
 	descriptor       core.Descriptor
 	currentStatus    core.ComponentStatus
 	statusChangeChan chan core.ComponentStatus
@@ -54,11 +55,11 @@ type vaultChecker struct {
 
 // OpenVaultClientFunc defines the signature for a function that can open a Vault client.
 // This is used to allow mocking of api.NewClient in tests.
-type OpenVaultClientFunc func(config *api.Config) (VaultClient, error)
+type OpenVaultClientFunc func(config *api.Config) (Client, error)
 
 // newRealVaultClient is a helper function to create a real vaultClient from *api.Client
 // This will be the default OpenVaultClientFunc used by NewVaultChecker.
-func newRealVaultClient(config *api.Config) (VaultClient, error) {
+func newRealVaultClient(config *api.Config) (Client, error) {
 	client, err := api.NewClient(config)
 	if err != nil {
 		return nil, err
@@ -98,14 +99,14 @@ func NewVaultCheckerWithOpenVaultClientFunc(descriptor core.Descriptor, checkInt
 
 // NewVaultCheckerWithClient creates a new HashiCorp Vault health checker component using an already initialized Vault client.
 // This allows users to provide a Vault client that has been set up and authenticated externally.
-func NewVaultCheckerWithClient(descriptor core.Descriptor, checkInterval time.Duration, client VaultClient) core.Component {
+func NewVaultCheckerWithClient(descriptor core.Descriptor, checkInterval time.Duration, client Client) core.Component {
 	return newVaultCheckerInternal(descriptor, checkInterval, client)
 }
 
 // newVaultCheckerInternal creates a new HashiCorp Vault health checker component with a provided vaultClient.
 // It continuously checks the Vault's health status and updates its own status.
 // This is an internal constructor used for testing purposes and for injecting a vaultClient.
-func newVaultCheckerInternal(descriptor core.Descriptor, checkInterval time.Duration, client VaultClient) core.Component {
+func newVaultCheckerInternal(descriptor core.Descriptor, checkInterval time.Duration, client Client) core.Component {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	// Initial status is initializing

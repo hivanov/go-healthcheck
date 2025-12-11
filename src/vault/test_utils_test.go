@@ -79,7 +79,7 @@ func SetupVaultContainerForTests(ctx context.Context) (testcontainers.Container,
 	// Wait for Vault to be unsealed and ready
 	err = waitForVaultReady(ctx, client)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("Vault did not become ready: %v", err)
+		return nil, "", nil, fmt.Errorf("vault did not become ready: %v", err)
 	}
 	log.Println("Vault is unsealed and ready.")
 

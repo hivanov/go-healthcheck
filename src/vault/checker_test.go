@@ -70,7 +70,7 @@ func TestVaultChecker_Health_Pass(t *testing.T) {
 		Description:   "Test Vault health pass",
 	}
 
-	mockOpenClient := func(config *api.Config) (checker.VaultClient, error) {
+	mockOpenClient := func(config *api.Config) (checker.Client, error) {
 		return &realVaultClient{client: GlobalVaultClient}, nil
 	}
 
@@ -90,13 +90,13 @@ func TestVaultChecker_Health_Pass(t *testing.T) {
 }
 
 type mockVaultClient struct {
-	sysFunc        func() checker.VaultSysInterface
+	sysFunc        func() checker.SysInterface
 	closeFunc      func()
 	healthResponse *api.HealthResponse
 	healthError    error
 }
 
-func (m *mockVaultClient) Sys() checker.VaultSysInterface {
+func (m *mockVaultClient) Sys() checker.SysInterface {
 	if m.sysFunc != nil {
 		return m.sysFunc()
 	}
@@ -131,7 +131,7 @@ func TestNewVaultChecker_ErrorOpenClient(t *testing.T) {
 	expectedError := fmt.Errorf("failed to create client for test")
 
 	// Mock OpenVaultClientFunc to return an error
-	errorOpenClient := func(config *api.Config) (checker.VaultClient, error) {
+	errorOpenClient := func(config *api.Config) (checker.Client, error) {
 		return nil, expectedError
 	}
 
@@ -240,7 +240,7 @@ func TestVaultChecker_VariousHealthStates(t *testing.T) {
 			}
 
 			testChecker := checker.NewVaultCheckerWithOpenVaultClientFunc(descriptor, 10*time.Millisecond, api.DefaultConfig(),
-				func(config *api.Config) (checker.VaultClient, error) {
+				func(config *api.Config) (checker.Client, error) {
 					return mockClient, nil
 				})
 			assert.NotNil(t, testChecker)
@@ -270,7 +270,7 @@ func TestVaultChecker_NilClientInPerformHealthCheck(t *testing.T) {
 	// This mockOpenClient returns a nil checker.VaultClient, but no error,
 	// so NewVaultCheckerWithOpenVaultClientFunc proceeds to call newVaultCheckerInternal
 	// with a nil client.
-	nilClientOpenFunc := func(config *api.Config) (checker.VaultClient, error) {
+	nilClientOpenFunc := func(config *api.Config) (checker.Client, error) {
 		return nil, nil // Return nil client, no error
 	}
 
@@ -306,7 +306,7 @@ func TestVaultChecker_UpdateStatus_ChannelFull(t *testing.T) {
 	// Create a checker instance using the mock client. Use a very long check interval
 	// to prevent periodic background checks from interfering with the manual status updates.
 	testChecker := checker.NewVaultCheckerWithOpenVaultClientFunc(descriptor, 1*time.Hour, api.DefaultConfig(),
-		func(config *api.Config) (checker.VaultClient, error) {
+		func(config *api.Config) (checker.Client, error) {
 			return mockClient, nil
 		})
 	assert.NotNil(t, testChecker)
@@ -380,7 +380,7 @@ func TestVaultChecker_Close(t *testing.T) {
 	}
 
 	// Create a checker that uses the real Vault client indirectly
-	mockOpenClient := func(config *api.Config) (checker.VaultClient, error) {
+	mockOpenClient := func(config *api.Config) (checker.Client, error) {
 		return &realVaultClient{client: GlobalVaultClient}, nil
 	}
 	testChecker := checker.NewVaultCheckerWithOpenVaultClientFunc(descriptor, 1*time.Second, api.DefaultConfig(), mockOpenClient)
@@ -409,7 +409,7 @@ func TestVaultChecker_Disable_Enable(t *testing.T) {
 		Description:   "Test Vault disable/enable",
 	}
 
-	mockOpenClient := func(config *api.Config) (checker.VaultClient, error) {
+	mockOpenClient := func(config *api.Config) (checker.Client, error) {
 		return &realVaultClient{client: GlobalVaultClient}, nil
 	}
 	testChecker := checker.NewVaultCheckerWithOpenVaultClientFunc(descriptor, 1*time.Second, api.DefaultConfig(), mockOpenClient)
@@ -480,7 +480,7 @@ func TestVaultChecker_ChangeStatus(t *testing.T) {
 		Description:   "Test Vault change status",
 	}
 
-	mockOpenClient := func(config *api.Config) (checker.VaultClient, error) {
+	mockOpenClient := func(config *api.Config) (checker.Client, error) {
 		return &realVaultClient{client: GlobalVaultClient}, nil
 	}
 	testChecker := checker.NewVaultCheckerWithOpenVaultClientFunc(descriptor, 10*time.Minute, api.DefaultConfig(), mockOpenClient) // Long interval to avoid immediate overwrite
@@ -526,7 +526,7 @@ func TestVaultChecker_Descriptor(t *testing.T) {
 		ReleaseID:     "v1.0.0-rc1",
 	}
 
-	mockOpenClient := func(config *api.Config) (checker.VaultClient, error) {
+	mockOpenClient := func(config *api.Config) (checker.Client, error) {
 		return &realVaultClient{client: GlobalVaultClient}, nil
 	}
 	testChecker := checker.NewVaultCheckerWithOpenVaultClientFunc(expectedDescriptor, 1*time.Second, api.DefaultConfig(), mockOpenClient)
@@ -550,7 +550,7 @@ func TestVaultChecker_StatusChange(t *testing.T) {
 		Description:   "Test Vault status change",
 	}
 
-	mockOpenClient := func(config *api.Config) (checker.VaultClient, error) {
+	mockOpenClient := func(config *api.Config) (checker.Client, error) {
 		return &realVaultClient{client: GlobalVaultClient}, nil
 	}
 	testChecker := checker.NewVaultCheckerWithOpenVaultClientFunc(descriptor, 500*time.Millisecond, api.DefaultConfig(), mockOpenClient)
@@ -658,7 +658,7 @@ type realVaultClient struct {
 	client *api.Client
 }
 
-func (r *realVaultClient) Sys() checker.VaultSysInterface {
+func (r *realVaultClient) Sys() checker.SysInterface {
 	return r.client.Sys()
 }
 
