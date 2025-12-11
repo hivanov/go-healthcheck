@@ -1,6 +1,8 @@
 package s3
 
 import (
+	"context"
+	"fmt"
 	"healthcheck/core"
 	"net/url" // For URL parsing validation
 	"testing"
@@ -38,7 +40,7 @@ func FuzzS3Checker_NewS3Checker(f *testing.F) {
 		}
 		operationTimeout := time.Duration(operationTimeoutMs) * time.Millisecond
 
-		s3Config := &S3Config{
+		s3Config := &Config{
 			EndpointURL:      endpointURL,
 			Region:           region,
 			BucketName:       bucketName,
@@ -49,7 +51,7 @@ func FuzzS3Checker_NewS3Checker(f *testing.F) {
 		}
 
 		// Mock OpenS3ClientFunc to simulate client creation success/failure
-		mockOpenS3Client := func(cfg *S3Config) (s3Client, error) {
+		mockOpenS3Client := func(cfg *Config) (Client, error) {
 			// Basic validation for EndpointURL to simulate real client behavior
 			if cfg.EndpointURL != "" {
 				_, err := url.ParseRequestURI(cfg.EndpointURL)
@@ -65,7 +67,7 @@ func FuzzS3Checker_NewS3Checker(f *testing.F) {
 			}
 
 			// Simulate successful client creation, but with mock HeadBucket behavior
-			mockClient := &mockS3Client{
+			mockClient := &mockClient{
 				headBucketFunc: func(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
 					// Simulate different errors based on bucket name or config
 					if *params.Bucket == "non-existent-bucket" {

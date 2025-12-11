@@ -2,9 +2,7 @@ package s3
 
 import (
 	"context"
-	"fmt"
 	"healthcheck/core"
-	"log"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,7 +20,7 @@ const (
 
 // TestS3Checker_HealthLoad tests the load handling of the Health() method with a mock client.
 func TestS3Checker_HealthLoad(t *testing.T) {
-	mockClient := &mockS3Client{
+	mockClient := &mockClient{
 		headBucketFunc: func(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
 			return &s3.HeadBucketOutput{}, nil // Always return success
 		},
@@ -31,7 +29,7 @@ func TestS3Checker_HealthLoad(t *testing.T) {
 	desc := core.Descriptor{ComponentID: "s3-load-test", ComponentType: "s3"}
 	checkInterval := 1 * time.Second
 	operationTimeout := 1 * time.Second
-	s3Config := &S3Config{BucketName: "test-bucket", Region: "us-east-1"}
+	s3Config := &Config{BucketName: "test-bucket", Region: "us-east-1"}
 
 	checker := newS3CheckerInternal(desc, checkInterval, operationTimeout, s3Config, mockClient)
 	defer func() {
