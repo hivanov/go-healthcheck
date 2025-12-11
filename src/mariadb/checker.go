@@ -147,7 +147,7 @@ func (c *Checker) updateStatus(newStatus core.ComponentStatus) {
 // They are not used in this simplified checker.
 
 // ChangeStatus is a no-op.
-func (c *Checker) ChangeStatus(status core.ComponentStatus) {}
+func (c *Checker) ChangeStatus(core.ComponentStatus) {}
 
 // Disable is a no-op.
 func (c *Checker) Disable() {}
