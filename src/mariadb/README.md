@@ -1,29 +1,10 @@
 # MariaDB Health Checker
 
-This Go module provides a health checker for MariaDB databases, designed to be integrated into a larger health-check system. It continuously monitors the availability and responsiveness of a MariaDB instance by periodically executing a simple query (`SELECT 1`).
-
-## Features
-
-*   **Asynchronous Checks:** Health checks are performed in a separate goroutine, keeping the `Health()` method non-blocking and always returning the last known status.
-*   **Status Reporting:** Provides detailed status information including current health status (Pass, Fail, Warn), output messages, and observed metrics (e.g., query duration).
-*   **Dynamic Control:** Supports enabling and disabling the checker, as well as manually changing its status.
-*   **Testcontainers Integration:** Integration tests leverage Testcontainers for spinning up real MariaDB instances, ensuring robust and realistic testing.
-*   **Fuzz Testing:** Includes fuzz tests to discover unexpected behavior with varied connection string inputs.
-*   **Load Testing:** Verifies the `Health()` method's performance under load, ensuring it can handle a high volume of requests efficiently.
-
-## Installation
-
-To use this health checker in your Go project, first ensure you have Go installed (version 1.22 or higher recommended).
-
-```bash
-go get sit-paas/go/health-check/src/mariadb
-```
-
-This module depends on the `github.com/go-sql-driver/mysql` driver, which is automatically fetched by `go get`.
+This package provides a health checker for MariaDB databases.
 
 ## Usage
 
-Here's a basic example of how to initialize and use the MariaDB health checker:
+To create a new MariaDB health checker, use the `New` function:
 
 ```go
 package main
@@ -31,94 +12,48 @@ package main
 import (
 	"fmt"
 	"healthcheck/core"
-	"healthcheck/src/mariadb"
-	"log"
-	time "time"
+	"healthcheck/mariadb"
+	"time"
 )
 
 func main() {
-	// Define a descriptor for your MariaDB component
 	descriptor := core.Descriptor{
-		ComponentID:   "my-mariadb-instance",
-		ComponentType: "mariadb",
-		ComponentName: "Production MariaDB",
+		ComponentID:   "mariadb-checker",
+		ComponentType: "database",
 	}
 
-	// MariaDB connection string (replace with your actual connection details)
-	// Example for a local MariaDB: "user:password@tcp(127.0.0.1:3306)/dbname"
-	connectionString := "root:testpass@tcp(127.0.0.1:3306)/testdb" // Example for Testcontainers setup
-
-	// Create a new MariaDB health checker with a check interval of 5 seconds
-	checker := mariadb.NewMariaDBChecker(descriptor, 5*time.Second, connectionString)
-
-	// Ensure the checker is gracefully closed when the application exits
-	defer func() {
-		if err := checker.Close(); err != nil {
-			log.Printf("Error closing MariaDB checker: %v", err)
-		}
-	}()
-
-	// Listen for status changes (optional)
-	go func() {
-		for status := range checker.StatusChange() {
-			fmt.Printf("MariaDB Status Changed: %s - %s (Latency: %.2f%s)\n",
-				status.Status, status.Output, status.ObservedValue, status.ObservedUnit)
-		}
-	}()
-
-	// Periodically get the health status
-	for i := 0; i < 10; i++ {
-		health := checker.Health()
-		fmt.Printf("Current MariaDB Health: %s - %s\n", health.Status, health.Output)
-		time.Sleep(2 * time.Second)
+	// Create a new checker
+	checker, err := mariadb.New(
+		descriptor,
+		10*time.Second, // check interval
+		5*time.Second,  // query timeout
+		"user:password@tcp(127.0.0.1:3306)/database", // connection string
+	)
+	if err != nil {
+		fmt.Printf("Failed to create checker: %v\n", err)
+		return
 	}
+	defer checker.Close()
 
-	fmt.Println("Exiting main application.")
+	// Wait for status changes
+	for status := range checker.StatusChange() {
+		fmt.Printf("Status changed: %+v\n", status)
+	}
 }
 ```
 
-## Running Tests
+## Health Check Logic
 
-### Unit and Integration Tests
+The checker performs a `PING` on the database at the specified interval.
+- If the `PING` is successful, the status is `core.StatusPass`.
+- If the `PING` fails, the status is `core.StatusFail`.
 
-To run all tests, including unit tests and integration tests that use Testcontainers:
+## Integration Tests
 
-```bash
-go test ./...
+The integration tests use [Testcontainers](https://golang.testcontainers.org/) to spin up a MariaDB container. To run the integration tests, you need to have Docker installed and running.
+
+Then, you can run the tests with the following command:
+
 ```
-
-**Note:** Integration tests require Docker to be running, as they spin up a real MariaDB container using Testcontainers.
-
-### Fuzz Tests
-
-To run fuzz tests, use the following command:
-
-```bash
-go test -fuzz=FuzzMariaDBChecker -fuzztime=30s ./...
+TC_MARIADB_TEST=1 go test -v ./...
 ```
-
-This will run the fuzz tests for 30 seconds. Adjust `fuzztime` as needed.
-
-### Load Tests
-
-To run load tests:
-
-```bash
-go test -run TestMariaDBChecker_HealthLoad_WithRealDB -count=1 -v -test.parallel 1 ./...
-```
-
-This will run the load test against a real MariaDB instance spawned by Testcontainers, simulating concurrent calls to the `Health()` method.
-
-## Configuration
-
-The `NewMariaDBChecker` function takes the following parameters:
-
-*   `descriptor core.Descriptor`: A descriptor containing `ComponentID`, `ComponentType`, and `ComponentName`.
-*   `checkInterval time.Duration`: How often the health check should ping the database.
-*   `connectionString string`: The DSN (Data Source Name) for connecting to the MariaDB database.
-
-## Technical Details and Performance
-
-The `Health()` method is designed to be extremely lightweight and fast. It returns the `currentStatus` field, which is protected by a `sync.RWMutex` for concurrent read/write safety. This design ensures that calls to `Health()` do not block and provide immediate access to the latest known status.
-
-Performance benchmarks from load tests (e.g., `TestMariaDBChecker_HealthLoad_WithRealDB`) aim to verify that the `Health()` routine can handle at least 200 calls per second, even under adverse conditions such as the database temporarily going down. The actual health check (pinging the database) runs in a separate goroutine on a defined interval, ensuring the `Health()` method itself remains performant.

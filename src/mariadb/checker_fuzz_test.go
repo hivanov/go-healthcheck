@@ -8,46 +8,41 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func FuzzMariaDBChecker_NewMariaDBChecker(f *testing.F) {
-	// A typical MariaDB connection string (using the mysql driver format)
+func FuzzMariaDBChecker_New(f *testing.F) {
 	f.Add("testuser:testpass@tcp(localhost:3306)/testdb")
 	f.Fuzz(func(t *testing.T, connectionString string) {
 		descriptor := core.Descriptor{
 			ComponentID:   "fuzz-test",
 			ComponentType: "mariadb",
 		}
-		checkInterval := 10 * time.Millisecond // Shorter interval for fuzzing
-		queryTimeout := 50 * time.Millisecond  // Short query timeout for fuzzing
+		checkInterval := 10 * time.Millisecond
+		queryTimeout := 50 * time.Millisecond
 
-		// We call NewMariaDBChecker, which is the public entry point.
-		// We expect this function to not panic.
-		checker := NewMariaDBChecker(descriptor, checkInterval, queryTimeout, connectionString)
-		defer func() {
-			if err := checker.Close(); err != nil {
-				t.Errorf("Checker Close() returned an unexpected error: %v", err)
-			}
-		}()
-
-		if checker == nil {
-			t.Skipf("NewMariaDBChecker returned nil for connection string: %s", connectionString)
-			return
+		checker, err := New(descriptor, checkInterval, queryTimeout, connectionString)
+		// New may or may not return an error depending on the driver's ability to parse the conn string.
+		// We handle both cases.
+		if err != nil {
+			return // Valid scenario, connection string was invalid from the start.
 		}
 
-		// Exercise other methods
-		_ = checker.Status()
-		_ = checker.Descriptor()
-		_ = checker.Health()
-		checker.Disable()
-		checker.Enable()
-		checker.ChangeStatus(core.ComponentStatus{Status: core.StatusFail, Output: "fuzz"})
+		if checker == nil {
+			t.Fatalf("New returned nil checker without an error for connection string: %s", connectionString)
+		}
 
-		// Allow some time for goroutines to process if necessary
+		defer func() {
+			assert.NoError(t, checker.Close(), "Checker Close() returned an unexpected error")
+		}()
+
+		// Allow some time for the initial check to happen.
 		time.Sleep(checkInterval * 2)
 
 		status := checker.Status()
-		// Depending on the connection string, status could be Warn (initializing/disabled) or Fail (connection error).
-		// We primarily care that it doesn't panic and that the status is one of the expected ones.
-		assert.True(t, status.Status == core.StatusWarn || status.Status == core.StatusFail,
-			"Unexpected status %s for connection string: %s", status.Status, connectionString)
+		// Status will likely be Fail because the connection string is random.
+		// We are mainly interested in ensuring no panics occur.
+		assert.NotEqual(t, core.StatusPass, status.Status, "Expected status not to be 'pass' with a random connection string")
+
+		// Exercise other getters
+		_ = checker.Descriptor()
+		_ = checker.StatusChange()
 	})
 }
