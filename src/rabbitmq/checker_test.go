@@ -311,7 +311,7 @@ func TestRabbitMQHealthCheck_ConnectionCloseError(t *testing.T) {
 	mockConn.SetCloseError(fmt.Errorf("mock connection close error"))
 
 	descriptor := core.Descriptor{ComponentID: "test-close-conn-error", ComponentType: "rabbitmq"}
-	checker := newRabbitMQCheckerInternal(descriptor, 10*time.Millisecond, mockConn) // Short interval for quick check
+	checker := newRabbitMQCheckerInternal(descriptor, 10*time.Millisecond, 20*time.Millisecond, mockConn) // Short interval for quick check
 	// Removed defer checker.Close() to prevent double close of quit channel
 
 	// Give it some time to run a check and then close
