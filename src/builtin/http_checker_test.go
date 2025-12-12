@@ -211,13 +211,13 @@ func TestHTTPChecker_HealthAndDescriptor(t *testing.T) {
 	assert.Equal(t, "", health.ObservedUnit)
 }
 
-func TestHTTPChecker_ExternalChangesAreNoOp(t *testing.T) {
+func TestHTTPChecker_EnableDisable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
-	opts := HTTPCheckerOptions{URL: server.URL, Interval: 10 * time.Millisecond}
+	opts := HTTPCheckerOptions{URL: server.URL, Interval: 20 * time.Millisecond}
 	c, err := NewHTTPCheckerComponent(opts)
 	require.NoError(t, err)
 	defer func() {
@@ -225,52 +225,50 @@ func TestHTTPChecker_ExternalChangesAreNoOp(t *testing.T) {
 	}()
 	observer := c.StatusChange()
 
-	// Wait for initial status
+	// 1. Wait for initial pass status
 	require.Eventually(t, func() bool {
-		select {
-		case <-observer:
-			return true
-		default:
-			return false
-		}
-	}, 100*time.Millisecond, 10*time.Millisecond, "Did not receive initial status update")
+		return c.Status().Status == core.StatusPass
+	}, 100*time.Millisecond, 10*time.Millisecond, "did not get initial pass status")
 
-	// Attempt to disable the component
+	// 2. Disable the checker
 	c.Disable()
 
-	// The component should ignore the disable command and continue updating.
+	// 3. Assert status becomes Warn
+	var status core.ComponentStatus
 	require.Eventually(t, func() bool {
 		select {
-		case update := <-observer:
-			return update.Status == core.StatusPass
+		case status = <-observer:
+			return status.Status == core.StatusWarn
 		default:
 			return false
 		}
-	}, 200*time.Millisecond, 10*time.Millisecond, "Did not receive expected status update after Disable()")
+	}, 100*time.Millisecond, 10*time.Millisecond, "did not get warn status after disable")
+	assert.Equal(t, "health check disabled", status.Output)
+	assert.Equal(t, core.StatusWarn, c.Status().Status)
 
-	// Attempt to change status directly
-	c.ChangeStatus(core.ComponentStatus{Status: core.StatusFail, Output: "test"})
+	// 4. Wait to ensure no more updates are coming
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case unexpectedStatus := <-observer:
+		t.Fatalf("Received unexpected status update while disabled: %+v", unexpectedStatus)
+	default:
+		// OK
+	}
 
-	require.Eventually(t, func() bool {
-		select {
-		case update := <-observer:
-			return update.Status == core.StatusPass
-		default:
-			return false
-		}
-	}, 200*time.Millisecond, 10*time.Millisecond, "Did not receive expected status update after ChangeStatus()")
-
-	// Attempt to enable the component
+	// 5. Enable the checker
 	c.Enable()
 
+	// 6. Assert status becomes Pass again
 	require.Eventually(t, func() bool {
 		select {
-		case update := <-observer:
-			return update.Status == core.StatusPass
+		case status = <-observer:
+			return status.Status == core.StatusPass
 		default:
 			return false
 		}
-	}, 200*time.Millisecond, 10*time.Millisecond, "Did not receive expected status update after Enable()")
+	}, 100*time.Millisecond, 10*time.Millisecond, "did not get pass status after enable")
+	assert.Contains(t, status.Output, "returned status 200")
+	assert.Equal(t, core.StatusPass, c.Status().Status)
 }
 
 func FuzzHTTPChecker(f *testing.F) {

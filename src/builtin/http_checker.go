@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"healthcheck/core"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ type httpChecker struct {
 	cancelFunc     context.CancelFunc
 	mutex          sync.RWMutex
 	options        HTTPCheckerOptions
+	disabled       bool
 }
 
 // Ensure httpChecker implements the Component interface
@@ -54,6 +56,7 @@ func NewHTTPCheckerComponent(options HTTPCheckerOptions) (core.Component, error)
 		ctx:        ctx,
 		cancelFunc: cancelFunc,
 		options:    options,
+		disabled:   false,
 	}
 
 	go hc.start()
@@ -66,7 +69,7 @@ func (hc *httpChecker) start() {
 	ticker := time.NewTicker(hc.options.Interval)
 	defer ticker.Stop()
 
-	// Perform initial check immediately
+	// Perform the initial check immediately
 	hc.performCheck()
 
 	for {
@@ -80,6 +83,19 @@ func (hc *httpChecker) start() {
 }
 
 func (hc *httpChecker) performCheck() {
+	select {
+	case <-hc.ctx.Done():
+		return
+	default:
+	}
+
+	hc.mutex.RLock()
+	if hc.disabled {
+		hc.mutex.RUnlock()
+		return
+	}
+	hc.mutex.RUnlock()
+
 	client := &http.Client{
 		Timeout: hc.options.Timeout,
 	}
@@ -95,7 +111,12 @@ func (hc *httpChecker) performCheck() {
 		hc.updateStatus(core.StatusFail, fmt.Sprintf("HTTP GET request failed: %v", err))
 		return
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			hc.updateStatus(core.StatusFail, fmt.Sprintf("Failed to close HTTP response body: %v", err))
+		}
+	}(resp.Body)
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		hc.updateStatus(core.StatusPass, fmt.Sprintf("HTTP GET to %s returned status %d", hc.options.URL, resp.StatusCode))
@@ -105,6 +126,12 @@ func (hc *httpChecker) performCheck() {
 }
 
 func (hc *httpChecker) updateStatus(status core.StatusEnum, output string) {
+	select {
+	case <-hc.ctx.Done():
+		return // Component is closed.
+	default:
+	}
+
 	newStatus := core.ComponentStatus{
 		Status: status,
 		Time:   time.Now(),
@@ -115,12 +142,15 @@ func (hc *httpChecker) updateStatus(status core.StatusEnum, output string) {
 	hc.lastStatus = newStatus
 	hc.mutex.Unlock()
 
-	// Broadcast the change
+	// Broadcast the change, but don't block or panic if the component is closed.
 	select {
 	case <-hc.observerChange: // Drain old status if buffer is full
 	default:
 	}
-	hc.observerChange <- newStatus
+	select {
+	case hc.observerChange <- newStatus:
+	case <-hc.ctx.Done(): // Abort if closed during drain.
+	}
 }
 
 func (hc *httpChecker) Close() error {
@@ -131,11 +161,40 @@ func (hc *httpChecker) Close() error {
 // ChangeStatus is a no-op for HTTPChecker component as its status is internally managed.
 func (hc *httpChecker) ChangeStatus(status core.ComponentStatus) {}
 
-// Disable is a no-op for HTTPChecker component as its status is always checked.
-func (hc *httpChecker) Disable() {}
+// Disable stops the health check ticker.
+func (hc *httpChecker) Disable() {
+	select {
+	case <-hc.ctx.Done():
+		return
+	default:
+	}
+	hc.mutex.Lock()
+	if hc.disabled {
+		hc.mutex.Unlock()
+		return
+	}
+	hc.disabled = true
+	hc.mutex.Unlock()
+	hc.updateStatus(core.StatusWarn, "health check disabled")
+}
 
-// Enable is a no-op for HTTPChecker component as its status is always checked.
-func (hc *httpChecker) Enable() {}
+// Enable resumes the health check ticker and performs an immediate check.
+func (hc *httpChecker) Enable() {
+	select {
+	case <-hc.ctx.Done():
+		return
+	default:
+	}
+	hc.mutex.Lock()
+	if !hc.disabled {
+		hc.mutex.Unlock()
+		return
+	}
+	hc.disabled = false
+	hc.mutex.Unlock()
+
+	go hc.performCheck()
+}
 
 func (hc *httpChecker) Status() core.ComponentStatus {
 	hc.mutex.RLock()

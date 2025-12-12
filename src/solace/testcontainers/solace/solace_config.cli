@@ -1,0 +1,125 @@
+enable
+configure
+
+! ====================================================================
+! Global SSL Configuration
+! ====================================================================
+ssl
+    ! Explicitly load the server certificate. This is handled by env vars on
+    ! first startup, but explicitly setting it here makes the script a
+    ! complete source of truth for the config. The default, auto-generated
+    ! cert is not password protected.
+    server-certificate server.pem
+    no shutdown
+exit
+
+! ====================================================================
+! 1. Global Authentication Configuration: Create the Client CA
+! ====================================================================
+authentication
+    ! Create a named CA and load the client's public certificate into it.
+    ! For self-signed certs, the cert itself is the CA.
+    create client-certificate-authority eakz_ca
+        certificate file client.pem
+        no shutdown
+    exit
+    no shutdown
+exit
+
+! ====================================================================
+! 2. Message VPN Configuration
+! ====================================================================
+message-vpn default
+    ssl
+        no shutdown
+    exit
+    ! --- Service Configuration ---
+    service smf
+        ! Enable SSL specifically on the secure listen port 55443
+        listen-port 55443 ssl
+        no shutdown
+    exit
+
+    ! --- Authentication Configuration ---
+    authentication
+        ! Set authentication type to client-certificate
+        client-certificate
+            ! Point to the globally defined CA
+            client-certificate-authority eakz_ca
+            ! Use the certificate's Common Name (CN) as the client-username
+            username-source common-name
+            ! Enable this authentication method
+            no shutdown
+        exit
+        no shutdown
+    exit
+    no shutdown
+exit
+
+! ====================================================================
+! 3. Queue and Topic Configuration (unchanged)
+! ====================================================================
+message-spool message-vpn default
+    create queue eakz-audit
+        access-type non-exclusive
+        permission all consume
+        max-spool-usage 500
+        no shutdown
+    exit
+    create topic-endpoint eakz-audit
+        access-type non-exclusive
+        permission all modify-topic
+        no shutdown
+    exit
+    queue eakz-audit
+        subscription topic eakz-audit
+    exit
+exit
+
+! ====================================================================
+! 4. Client Profile and ACL Configuration (unchanged)
+! ====================================================================
+create client-profile eakz-client-profile message-vpn default
+    allow-guaranteed-message-receive
+    allow-guaranteed-message-send
+    allow-transacted-sessions
+    allow-guaranteed-endpoint-create
+    no shutdown
+exit
+
+create acl-profile eakz-acl message-vpn default
+    publish-topic
+        default-action allow-when-matches
+        add-exception "eakz-audit"
+        no shutdown
+    exit
+    subscribe-topic
+        default-action allow-when-matches
+        add-exception "eakz-audit"
+        no shutdown
+    exit
+    no shutdown
+exit
+
+! ====================================================================
+! 5. Client Username Configuration (unchanged)
+! ====================================================================
+create client-username solace-client message-vpn default
+    client-profile "eakz-client-profile"
+    acl-profile "eakz-acl"
+    no shutdown
+exit
+
+! ====================================================================
+! Enable client certificate login
+! ====================================================================
+message-vpn default
+    authentication
+        client-certificate
+            no shutdown
+        exit
+    exit
+exit
+
+end
+exit
