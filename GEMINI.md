@@ -61,6 +61,7 @@ interactions and code modifications.
 12. It is of extreme importance that each checker provides means to handle all errors arising in all spawned goroutines. It should be rock-solid, and in no case should it allow for undefined behavior, unhandled errors and stalled processes.
 13. In every case that matters, tasks started by the Checker components must ensure a configurable time budget for execution. For example, if an HTTP call is made, a maximum response wait time must be provided in an Options (passed to the factory method), so that the routine does not stall indefinitely. Same for all other external calls. Utilize contexts with timeout aggressively.
 14. Always put time limits on the operations. Do not allow them to run forever.
+15. Always update the global README.md file if any changes are made that necessitate it (e.g., adding a new component, changing usage patterns).
 
 # Error handling
 - Use `errors.Join()` instead of wrapping errors in `Errorf()`.
@@ -89,7 +90,7 @@ The general rule is to always search for examples and provide the minimum needed
 Good examples include:
 
 ```go
-import "healthcheck/core"
+import "github.com/hivanov/go-healthcheck/src/core"
 
 func NewPostgresHealthcheck(connectionString string) (core.Component, error) { /* implementation goes here */ }
 ``` 
@@ -99,7 +100,7 @@ or
 ```go
 import (
     "github.com/hashicorp/vault/api"
-    "healthcheck/core"
+    "github.com/hivanov/go-healthcheck/src/core"
 )
 func NewVaultHealthcheck(client *api.Client)
 ```

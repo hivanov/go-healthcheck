@@ -4,41 +4,59 @@ This package provides a health checker for MariaDB databases.
 
 ## Usage
 
-To create a new MariaDB health checker, use the `New` function:
+Here's a basic example of how to initialize and use the MariaDB health checker:
 
 ```go
 package main
 
 import (
 	"fmt"
-	"healthcheck/core"
-	"healthcheck/mariadb"
+	"github.com/hivanov/go-healthcheck/src/core"
+	"github.com/hivanov/go-healthcheck/src/mariadb"
+	"log"
 	"time"
 )
 
 func main() {
+	// Define a descriptor for your MariaDB component
 	descriptor := core.Descriptor{
-		ComponentID:   "mariadb-checker",
-		ComponentType: "database",
+		ComponentID:   "my-mariadb-instance",
+		ComponentType: "mariadb",
+		ComponentName: "Production MariaDB",
 	}
 
-	// Create a new checker
-	checker, err := mariadb.New(
-		descriptor,
-		10*time.Second, // check interval
-		5*time.Second,  // query timeout
-		"user:password@tcp(127.0.0.1:3306)/database", // connection string
-	)
+	// MariaDB connection string (replace with your actual connection details)
+	connectionString := "user:password@tcp(127.0.0.1:3306)/database" // Example for local setup
+
+	// Create a new MariaDB health checker with a check interval of 5 seconds
+	checker, err := mariadb.New(descriptor, 5*time.Second, 2*time.Second, connectionString)
 	if err != nil {
-		fmt.Printf("Failed to create checker: %v\n", err)
-		return
+		log.Fatalf("Failed to create MariaDB checker: %v", err)
 	}
-	defer checker.Close()
 
-	// Wait for status changes
-	for status := range checker.StatusChange() {
-		fmt.Printf("Status changed: %+v\n", status)
+	// Ensure the checker is gracefully closed when the application exits
+	defer func() {
+		if err := checker.Close(); err != nil {
+			log.Printf("Error closing MariaDB checker: %v", err)
+		}
+	}()
+
+	// Listen for status changes (optional)
+	go func() {
+		for status := range checker.StatusChange() {
+			fmt.Printf("MariaDB Status Changed: %s - %s (Latency: %.2f%s)\n",
+				status.Status, status.Output, status.ObservedValue, status.ObservedUnit)
+		}
+	}()
+
+	// Periodically get the health status
+	for i := 0; i < 10; i++ {
+		health := checker.Health()
+		fmt.Printf("Current MariaDB Health: %s - %s\n", health.Status, health.Output)
+		time.Sleep(2 * time.Second)
 	}
+
+	fmt.Println("Exiting main application.")
 }
 ```
 

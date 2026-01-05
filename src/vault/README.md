@@ -1,6 +1,6 @@
 # HashiCorp Vault Health Checker
 
-This Go library provides a health checker component for HashiCorp Vault instances. It continuously monitors the health of a Vault server and reports its status, following the `healthcheck/core` component interface.
+This Go library provides a health checker component for HashiCorp Vault instances. It continuously monitors the health of a Vault server and reports its status, following the `github.com/hivanov/go-healthcheck/src/core` component interface.
 
 ## Features
 
@@ -17,7 +17,7 @@ This Go library provides a health checker component for HashiCorp Vault instance
 To include this library in your Go project, run:
 
 ```bash
-go get healthcheck/vault
+go get github.com/hivanov/go-healthcheck/src/vault
 ```
 
 ## Usage
@@ -33,8 +33,8 @@ import (
 	"time"
 
 	"github.com/hashicorp/vault/api"
-	"healthcheck/core"
-	"healthcheck/vault"
+	"github.com/hivanov/go-healthcheck/src/core"
+	"github.com/hivanov/go-healthcheck/src/vault"
 )
 
 func main() {
@@ -98,8 +98,8 @@ import (
 	"time"
 
 	"github.com/hashicorp/vault/api"
-	"healthcheck/core"
-	"healthcheck/vault"
+	"github.com/hivanov/go-healthcheck/src/core"
+	"github.com/hivanov/go-healthcheck/src/vault"
 )
 
 func main() {

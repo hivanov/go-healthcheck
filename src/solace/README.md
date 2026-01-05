@@ -1,6 +1,6 @@
 # Solace Health Checker
 
-This library provides a health checker component for Solace PubSub+, integrating with the `healthcheck/core` package. It uses the `github.com/SolaceLabs/solace-amqp-go` client library for Go.
+This library provides a health checker component for Solace PubSub+, integrating with the `github.com/hivanov/go-healthcheck/src/core` package. It uses the `github.com/SolaceLabs/solace-amqp-go` client library for Go.
 
 ## Health Check Details
 
@@ -25,8 +25,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"healthcheck/core"
-	"healthcheck/solace"
+	"github.com/hivanov/go-healthcheck/src/core"
+	"github.com/hivanov/go-healthcheck/src/solace"
 	"time"
 )
 
@@ -71,7 +71,7 @@ This constructor allows you to inject a custom `OpenSolaceFunc`, which is useful
 import (
 	"context"
 	"fmt"
-	"healthcheck/solace"
+	"github.com/hivanov/go-healthcheck/src/solace"
 	"github.com/SolaceLabs/solace-amqp-go/amqp"
 )
 

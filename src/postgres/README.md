@@ -17,7 +17,7 @@ To use this health checker in your Go project, first ensure you have Go installe
 
 ```bash
 go get github.com/lib/pq
-go get healthcheck/postgres
+go get github.com/hivanov/go-healthcheck/src/postgres
 ```
 
 This module depends on the `github.com/lib/pq` driver, which is automatically fetched by `go get`.
@@ -31,8 +31,8 @@ package main
 
 import (
 	"fmt"
-	"healthcheck/core"
-	"healthcheck/postgres"
+	"github.com/hivanov/go-healthcheck/src/core"
+	"github.com/hivanov/go-healthcheck/src/postgres"
 	"log"
 	"time"
 )

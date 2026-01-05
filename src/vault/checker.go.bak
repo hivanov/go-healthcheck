@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hivanov/go-healthcheck/src/core"
+	"github.com/hivanov/go-github.com/hivanov/go-healthcheck/src/src/core"
 
 	"github.com/hashicorp/vault/api"
 )

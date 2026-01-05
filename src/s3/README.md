@@ -1,6 +1,6 @@
 # Amazon S3 Health Checker
 
-This library provides a health checker component for Amazon S3, integrating with the `healthcheck/core` package. It uses the official `github.com/aws/aws-sdk-go-v2/service/s3` client library for Go.
+This library provides a health checker component for Amazon S3, integrating with the `github.com/hivanov/go-healthcheck/src/core` package. It uses the official `github.com/aws/aws-sdk-go-v2/service/s3` client library for Go.
 
 ## Health Check Details
 
@@ -22,8 +22,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"healthcheck/core"
-	"healthcheck/s3"
+	"github.com/hivanov/go-healthcheck/src/core"
+	"github.com/hivanov/go-healthcheck/src/s3"
 	"time"
 )
 
@@ -79,7 +79,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"healthcheck/s3"
+	"github.com/hivanov/go-healthcheck/src/s3"
 )
 
 type mockS3Client struct {

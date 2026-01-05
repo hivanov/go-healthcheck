@@ -7,7 +7,7 @@ This module provides a health checker component for RabbitMQ, designed to be int
 - **Connection Monitoring**: Periodically checks the connectivity to the RabbitMQ server.
 - **Message Publishing Test**: Verifies the ability to open a channel and publish messages, ensuring basic functionality.
 - **Status Reporting**: Provides real-time health status, including detailed output and observed metrics.
-- **Integration with `go-healthcheck/core`**: Implements the `core.Component` interface for seamless integration.
+- **Integration with `go-github.com/hivanov/go-healthcheck/src/core`**: Implements the `core.Component` interface for seamless integration.
 - **Testcontainers Support**: Integration tests leverage Testcontainers for spinning up a real RabbitMQ instance.
 - **Fuzz Testing**: Includes fuzz tests to ensure robust handling of various input parameters.
 - **Load Testing**: Benchmarks the `Health()` method to verify performance under load.
@@ -24,7 +24,7 @@ This module provides a health checker component for RabbitMQ, designed to be int
 To add this module to your project, use `go get`:
 
 ```bash
-go get healthcheck/rabbitmq
+go get github.com/hivanov/go-healthcheck/src/rabbitmq
 ```
 
 Or if you are working within the `go-work` workspace:
@@ -39,10 +39,13 @@ go work sync
 Here's a basic example of how to use the RabbitMQ health checker:
 
 ```go
+package main
+
 import (
 	"context"
 	"fmt"
-	"healthcheck/core"
+	"github.com/hivanov/go-healthcheck/src/core"
+	"github.com/hivanov/go-healthcheck/src/rabbitmq"
 	"log"
 	"time"
 )
@@ -101,7 +104,7 @@ func main() {
 Unit tests are integrated within the `checker.go` and `checker_test.go` files (though most logic is covered by integration tests).
 
 ```bash
-go test healthcheck/rabbitmq
+go test github.com/hivanov/go-healthcheck/src/rabbitmq
 ```
 
 #### Integration Tests
@@ -109,13 +112,13 @@ go test healthcheck/rabbitmq
 Integration tests require a running Docker daemon as they utilize Testcontainers to spin up a temporary RabbitMQ instance.
 
 ```bash
-go test -tags integration healthcheck/rabbitmq
+go test -tags integration github.com/hivanov/go-healthcheck/src/rabbitmq
 ```
 
 To run a specific integration test:
 
 ```bash
-go test -tags integration healthcheck/rabbitmq -run TestRabbitMQHealthCheck_Pass
+go test -tags integration github.com/hivanov/go-healthcheck/src/rabbitmq -run TestRabbitMQHealthCheck_Pass
 ```
 
 #### Fuzz Tests
@@ -123,7 +126,7 @@ go test -tags integration healthcheck/rabbitmq -run TestRabbitMQHealthCheck_Pass
 Fuzz tests are designed to find unexpected behavior by providing randomized inputs.
 
 ```bash
-go test -fuzz=FuzzNewRabbitMQChecker healthcheck/rabbitmq
+go test -fuzz=FuzzNewRabbitMQChecker github.com/hivanov/go-healthcheck/src/rabbitmq
 ```
 
 #### Load Tests
@@ -131,7 +134,7 @@ go test -fuzz=FuzzNewRabbitMQChecker healthcheck/rabbitmq
 Load tests verify the performance of the `Health()` routine under a specified load. These also require a running Docker daemon.
 
 ```bash
-go test -bench=. -benchtime=5s -run=^$ healthcheck/rabbitmq
+go test -bench=. -benchtime=5s -run=^$ github.com/hivanov/go-healthcheck/src/rabbitmq
 ```
 *(Note: Adjust `-benchtime` as needed for longer or shorter test runs. The output will show operations per second.)*
 

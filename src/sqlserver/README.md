@@ -8,14 +8,14 @@ This library provides a health checker component for Microsoft SQL Server databa
 - **Configurable Intervals**: Allows setting custom check intervals and query timeouts.
 - **Status Reporting**: Provides detailed status information, including `pass`, `fail`, or `warn`, along with output messages and observed values (e.g., query response time).
 - **Graceful Shutdown**: Properly closes database connections and stops background goroutines when the component is closed.
-- **Integration with `healthcheck/core`**: Implements the `core.Component` interface, making it pluggable into the main health-check framework.
+- **Integration with `github.com/hivanov/go-healthcheck/src/core`**: Implements the `core.Component` interface, making it pluggable into the main health-check framework.
 
 ## Installation
 
 To use this component, you need to import it into your Go project:
 
 ```bash
-go get healthcheck/sqlserver
+go get github.com/hivanov/go-healthcheck/src/sqlserver
 go get github.com/microsoft/go-mssqldb
 ```
 
@@ -29,8 +29,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"healthcheck/core"
-	"healthcheck/sqlserver"
+	"github.com/hivanov/go-healthcheck/src/core"
+	"github.com/hivanov/go-healthcheck/src/sqlserver"
 	"log"
 	time "time"
 )

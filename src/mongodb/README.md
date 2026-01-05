@@ -17,7 +17,7 @@ To use this health checker in your Go project, first ensure you have Go installe
 
 ```bash
 go get go.mongodb.org/mongo-driver/mongo
-go get healthcheck/mongodb
+go get github.com/hivanov/go-healthcheck/src/mongodb
 ```
 
 This module depends on the `go.mongodb.org/mongo-driver/mongo` driver, which is automatically fetched by `go get`.
@@ -31,8 +31,8 @@ package main
 
 import (
 	"fmt"
-	"healthcheck/core"
-	"healthcheck/mongodb"
+	"github.com/hivanov/go-healthcheck/src/core"
+	"github.com/hivanov/go-healthcheck/src/mongodb"
 	"log"
 	time "time"
 )

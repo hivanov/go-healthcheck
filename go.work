@@ -13,3 +13,17 @@ use (
 	./src/sqlserver
 	./src/vault
 )
+
+replace (
+	github.com/hivanov/go-healthcheck/src/builtin v0.0.0 => ./src/builtin
+	github.com/hivanov/go-healthcheck/src/core v0.0.0 => ./src/core
+	github.com/hivanov/go-healthcheck/src/mariadb v0.0.0 => ./src/mariadb
+	github.com/hivanov/go-healthcheck/src/mongodb v0.0.0 => ./src/mongodb
+	github.com/hivanov/go-healthcheck/src/postgres v0.0.0 => ./src/postgres
+	github.com/hivanov/go-healthcheck/src/rabbitmq v0.0.0 => ./src/rabbitmq
+	github.com/hivanov/go-healthcheck/src/redis v0.0.0 => ./src/redis
+	github.com/hivanov/go-healthcheck/src/s3 v0.0.0 => ./src/s3
+	github.com/hivanov/go-healthcheck/src/solace v0.0.0 => ./src/solace
+	github.com/hivanov/go-healthcheck/src/sqlserver v0.0.0 => ./src/sqlserver
+	github.com/hivanov/go-healthcheck/src/vault v0.0.0 => ./src/vault
+)

@@ -1,6 +1,6 @@
 # Redis Health Checker
 
-This library provides a health checker component for Redis, integrating with the `healthcheck/core` package. It uses the official `github.com/redis/go-redis/v9` client library for Go.
+This library provides a health checker component for Redis, integrating with the `github.com/hivanov/go-healthcheck/src/core` package. It uses the official `github.com/redis/go-redis/v9` client library for Go.
 
 ## Health Check Details
 
@@ -23,8 +23,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"healthcheck/core"
-	"healthcheck/redis"
+	"github.com/hivanov/go-healthcheck/src/core"
+	"github.com/hivanov/go-healthcheck/src/redis"
 	"time"
 
 	"github.com/redis/go-redis/v9"
