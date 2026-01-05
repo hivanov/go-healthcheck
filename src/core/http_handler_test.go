@@ -211,14 +211,10 @@ func TestNewHTTPHandler_Readiness(t *testing.T) {
 
 			// Create the actual service with mock components
 			svc := NewService(serviceDescriptor, components...)
-			defer svc.Close()
+			require.NoError(t, svc.Close(), "Failed to close mock service")
 			for _, comp := range components {
 				// Ensure all mock components are closed to prevent goroutine leaks
-				defer func(c Component) {
-					if err := c.Close(); err != nil {
-						t.Errorf("Error closing mock component %s: %v", c.Descriptor().ComponentID, err)
-					}
-				}(comp)
+				require.NoError(t, comp.Close(), "Failed to close mock component %s", comp.Descriptor().ComponentID)
 			}
 
 			// Give the service some time to recalculate its status after components are added

@@ -5,15 +5,11 @@ import (
 	"net/http"
 )
 
-// NewHTTPHandler creates a new http.Handler (typically a *http.ServeMux) that registers
-// liveness and readiness probes.
-//
-// The liveness probe (/.well-known/live) always returns HTTP 200 OK.
-// The readiness probe (/.well-known/ready) checks the health of the provided Service
-// and returns its status in JSON format.
-func NewHTTPHandler(service Service) http.Handler {
-	mux := http.NewServeMux()
-
+// AddHealthcheck is a convenience function that creates a new *http.ServeMux and registers the healthcheck handlers.
+// @param service The Service to check health.
+// @param mux The http.ServeMux to register the handlers with.
+// @return http.Handler The http.Handler that serves the healthcheck endpoints.
+func AddHealthcheck(mux *http.ServeMux, service Service) http.Handler {
 	// Liveness probe handler
 	mux.HandleFunc("/.well-known/live", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -49,6 +45,16 @@ func NewHTTPHandler(service Service) http.Handler {
 	return mux
 }
 
+// NewHTTPHandler creates a new http.Handler (typically a *http.ServeMux) that registers
+// liveness and readiness probes.
+//
+// The liveness probe (/.well-known/live) always returns HTTP 200 OK.
+// The readiness probe (/.well-known/ready) checks the health of the provided Service
+// and returns its status in JSON format.
+func NewHTTPHandler(service Service) http.Handler {
+	return AddHealthcheck(http.NewServeMux(), service)
+}
+
 // Ensure NewHTTPHandler is tested.
 // While not strictly a "Component" it uses the Service interface.
 // For testing purposes, we can create a mock Service.
@@ -70,10 +76,3 @@ var _ = NewHTTPHandler(
 		),
 	),
 )
-
-func init() {
-	// Register the handler with a dummy service to prevent unused variable error in package without a main function.
-	// This is typically used in a real application's main func.
-	// For testing, this serves to ensure the function compiles.
-	_ = NewHTTPHandler(NewService(Descriptor{}))
-}
