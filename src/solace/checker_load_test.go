@@ -1,7 +1,6 @@
 package solace
 
 import (
-	"context"
 	"healthcheck/core"
 	"sync"
 	"sync/atomic"
@@ -9,8 +8,11 @@ import (
 	"time"
 
 	"github.com/Azure/go-amqp"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+var _ = amqp.SessionOptions{}
 
 const (
 	minCallsPerSecond = 200
@@ -21,25 +23,22 @@ const (
 // TestSolaceChecker_HealthLoad tests the load handling of the Health() method with a mock client.
 func TestSolaceChecker_HealthLoad(t *testing.T) {
 	mockSenderConcrete := newMockSolaceSender()
-	mockSenderConcrete.sendFunc = func(ctx context.Context, msg *amqp.Message, opts *amqp.SendOptions) error { return nil }
+	mockSenderConcrete.On("Send", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	mockSenderConcrete.On("Close").Return(nil)
 
 	mockReceiverConcrete := newMockSolaceReceiver()
-	mockReceiverConcrete.receiveFunc = func(ctx context.Context, opts *amqp.ReceiveOptions) (*amqp.Message, error) {
-		return amqp.NewMessage([]byte("mock")), nil
-	}
+	mockReceiverConcrete.On("Receive", mock.Anything, mock.Anything).Return(amqp.NewMessage([]byte("mock")), nil)
+	mockReceiverConcrete.On("AcceptMessage", mock.Anything, mock.Anything).Return(nil)
+	mockReceiverConcrete.On("Close").Return(nil)
 
 	mockSessionConcrete := newMockSolaceSession()
-	mockSessionConcrete.newSenderFunc = func(ctx context.Context, target string, opts *amqp.SenderOptions) (solaceSender, error) {
-		return mockSenderConcrete, nil
-	}
-	mockSessionConcrete.newReceiverFunc = func(ctx context.Context, source string, opts *amqp.ReceiverOptions) (solaceReceiver, error) {
-		return mockReceiverConcrete, nil
-	}
+	mockSessionConcrete.On("NewSender", mock.Anything, mock.Anything, mock.Anything).Return(mockSenderConcrete, nil)
+	mockSessionConcrete.On("NewReceiver", mock.Anything, mock.Anything, mock.Anything).Return(mockReceiverConcrete, nil)
+	mockSessionConcrete.On("Close").Return(nil)
 
 	mockConnectionConcrete := newMockSolaceConnection()
-	mockConnectionConcrete.newSessionFunc = func(ctx context.Context, opts *amqp.SessionOptions) (solaceSession, error) {
-		return mockSessionConcrete, nil
-	}
+	mockConnectionConcrete.On("NewSession", mock.Anything, mock.Anything).Return(mockSessionConcrete, nil)
+	mockConnectionConcrete.On("Close").Return(nil)
 
 	desc := core.Descriptor{ComponentID: "solace-load-test", ComponentType: "solace"}
 	checkInterval := 1 * time.Second
@@ -98,7 +97,7 @@ func TestSolaceChecker_HealthLoad_WithRealSolace(t *testing.T) {
 	}()
 
 	// Wait for the checker to become healthy first
-	waitForStatus(t, checker, core.StatusPass, 20*time.Second) // Increased timeout for initial check
+	waitForStatus(t, checker, core.StatusPass) // Increased timeout for initial check
 
 	var stopWg sync.WaitGroup
 	stopWg.Add(1)
@@ -140,5 +139,5 @@ func TestSolaceChecker_HealthLoad_WithRealSolace(t *testing.T) {
 	require.GreaterOrEqual(t, actualCallsPerSecond, float64(minCallsPerSecond), "Health() method should handle at least %d calls per second even when Solace goes down", minCallsPerSecond)
 
 	// Final check: the checker should be in a Fail state
-	waitForStatus(t, checker, core.StatusFail, 5*time.Second)
+	waitForStatus(t, checker, core.StatusFail)
 }

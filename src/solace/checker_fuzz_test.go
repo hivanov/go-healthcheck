@@ -1,7 +1,6 @@
 package solace
 
 import (
-	"context"
 	"fmt"
 	"healthcheck/core"
 	"net/url" // For URL parsing validation
@@ -10,6 +9,7 @@ import (
 
 	"github.com/Azure/go-amqp" // Updated import
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 func FuzzSolaceChecker_NewSolaceChecker(f *testing.F) {
@@ -38,6 +38,11 @@ func FuzzSolaceChecker_NewSolaceChecker(f *testing.F) {
 		}
 		operationsTimeout := time.Duration(operationsTimeoutMs) * time.Millisecond
 
+		var mockConnectionConcrete *mockSolaceConnection
+		var mockSessionConcrete *mockSolaceSession
+		var mockSenderConcrete *mockSolaceSender
+		var mockReceiverConcrete *mockSolaceReceiver
+
 		// Mock OpenSolaceFunc to simulate connection success/failure and Solace operations
 		mockOpenSolace := func(connStr string) (solaceConnection, error) {
 			_, err := url.Parse(connStr) // Basic URL parsing check
@@ -50,41 +55,44 @@ func FuzzSolaceChecker_NewSolaceChecker(f *testing.F) {
 			}
 
 			// Create concrete mock instances and configure their internal functions
-			mockConnectionConcrete := newMockSolaceConnection() // Default instance
-			mockSessionConcrete := newMockSolaceSession()       // Default instance
-			mockSenderConcrete := newMockSolaceSender()         // Default instance
-			mockReceiverConcrete := newMockSolaceReceiver()     // Default instance
+			mockConnectionConcrete = newMockSolaceConnection()
+			mockSessionConcrete = newMockSolaceSession()
+			mockSenderConcrete = newMockSolaceSender()
+			mockReceiverConcrete = newMockSolaceReceiver()
 
-			mockConnectionConcrete.newSessionFunc = func(ctx context.Context, opts *amqp.SessionOptions) (solaceSession, error) {
-				if connStr == "amqp://admin:admin@session-fail" {
-					return nil, fmt.Errorf("mock session creation error")
-				}
-				mockSessionConcrete.newSenderFunc = func(ctx context.Context, target string, opts *amqp.SenderOptions) (solaceSender, error) {
-					if target == "sender-fail" {
-						return nil, fmt.Errorf("mock sender creation error")
-					}
-					mockSenderConcrete.sendFunc = func(ctx context.Context, msg *amqp.Message, opts *amqp.SendOptions) error {
-						if target == "send-fail" {
-							return fmt.Errorf("mock send error")
-						}
-						return nil
-					}
-					return mockSenderConcrete, nil
-				}
-				mockSessionConcrete.newReceiverFunc = func(ctx context.Context, source string, opts *amqp.ReceiverOptions) (solaceReceiver, error) {
-					if source == "receiver-fail" {
-						return nil, fmt.Errorf("mock receiver creation error")
-					}
-					mockReceiverConcrete.receiveFunc = func(ctx context.Context, opts *amqp.ReceiveOptions) (*amqp.Message, error) {
-						if source == "receive-fail" {
-							return nil, fmt.Errorf("mock receive error")
-						}
-						return amqp.NewMessage([]byte("fuzz message")), nil
-					}
-					return mockReceiverConcrete, nil
-				}
-				return mockSessionConcrete, nil
+			// Configure mocks for expected calls
+			mockConnectionConcrete.On("NewSession", mock.Anything, mock.Anything).Return(mockSessionConcrete, nil)
+			mockConnectionConcrete.On("Close").Return(nil)
+
+			mockSessionConcrete.On("NewSender", mock.Anything, mock.Anything, mock.Anything).Return(mockSenderConcrete, nil)
+			mockSessionConcrete.On("NewReceiver", mock.Anything, mock.Anything, mock.Anything).Return(mockReceiverConcrete, nil)
+			mockSessionConcrete.On("Close").Return(nil)
+
+			mockSenderConcrete.On("Send", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+			mockSenderConcrete.On("Close").Return(nil)
+
+			mockReceiverConcrete.On("Receive", mock.Anything, mock.Anything).Return(amqp.NewMessage([]byte("fuzz message")), nil)
+			mockReceiverConcrete.On("AcceptMessage", mock.Anything, mock.Anything).Return(nil)
+			mockReceiverConcrete.On("Close").Return(nil)
+
+			// Handle specific error cases for session, sender, receiver, send, receive
+			// These will override the general mock setup if a specific connection string is used
+			if connStr == "amqp://admin:admin@session-fail" {
+				mockConnectionConcrete.On("NewSession", mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock session creation error"))
 			}
+			if connStr == "amqp://admin:admin@sender-fail" {
+				mockSessionConcrete.On("NewSender", mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock sender creation error"))
+			}
+			if connStr == "amqp://admin:admin@receiver-fail" {
+				mockSessionConcrete.On("NewReceiver", mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock receiver creation error"))
+			}
+			if connStr == "amqp://admin:admin@send-fail" {
+				mockSenderConcrete.On("Send", mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("mock send error"))
+			}
+			if connStr == "amqp://admin:admin@receive-fail" {
+				mockReceiverConcrete.On("Receive", mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock receive error"))
+			}
+
 			return mockConnectionConcrete, nil
 		}
 

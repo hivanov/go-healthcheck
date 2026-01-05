@@ -8,8 +8,11 @@ import (
 	"time"
 
 	"github.com/Azure/go-amqp" // Official Solace Go AMQP client
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+var _ = amqp.SessionOptions{}
 
 // TestSolaceChecker_Integration_HappyPath tests a successful connection and health check.
 func TestSolaceChecker_Integration_HappyPath(t *testing.T) {
@@ -29,8 +32,8 @@ func TestSolaceChecker_Integration_HappyPath(t *testing.T) {
 	}()
 
 	// Expect initial 'Warn' then transition to 'Pass'
-	waitForStatus(t, checker, core.StatusWarn, 1*time.Second)  // Initializing
-	waitForStatus(t, checker, core.StatusPass, 20*time.Second) // Healthy, increased timeout for container readiness and initial check
+	waitForStatus(t, checker, core.StatusWarn) // Initializing
+	waitForStatus(t, checker, core.StatusPass) // Healthy, increased timeout for container readiness and initial check
 
 	status := checker.Status()
 	require.Equal(t, core.StatusPass, status.Status)
@@ -56,7 +59,7 @@ func TestSolaceChecker_Integration_Fail_NoConnection(t *testing.T) {
 	}()
 
 	// Should immediately go to Fail status
-	waitForStatus(t, checker, core.StatusFail, 5*time.Second)
+	waitForStatus(t, checker, core.StatusFail)
 
 	status := checker.Status()
 	require.Equal(t, core.StatusFail, status.Status)
@@ -81,7 +84,7 @@ func TestSolaceChecker_Integration_Fail_BrokerDown(t *testing.T) {
 	}()
 
 	// Wait for it to become healthy first
-	waitForStatus(t, checker, core.StatusPass, 20*time.Second)
+	waitForStatus(t, checker, core.StatusPass)
 
 	// Now stop the container
 	t.Log("Stopping Solace PubSub+ container...")
@@ -89,7 +92,7 @@ func TestSolaceChecker_Integration_Fail_BrokerDown(t *testing.T) {
 	t.Log("Solace PubSub+ container stopped.")
 
 	// It should now transition to a Fail state
-	waitForStatus(t, checker, core.StatusFail, 5*time.Second)
+	waitForStatus(t, checker, core.StatusFail)
 
 	status := checker.Status()
 	require.Equal(t, core.StatusFail, status.Status, "Expected status %s after container stopped, got %s", core.StatusFail, status.Status)
@@ -114,7 +117,7 @@ func TestSolaceChecker_Integration_DisableEnable(t *testing.T) {
 	}()
 
 	// Wait for it to become healthy first
-	waitForStatus(t, checker, core.StatusPass, 20*time.Second)
+	waitForStatus(t, checker, core.StatusPass)
 
 	// Disable the checker
 	checker.Disable()
@@ -145,7 +148,7 @@ func TestSolaceChecker_Integration_DisableEnable(t *testing.T) {
 	require.Equal(t, "Solace checker enabled, re-initializing...", status.Output)
 
 	// Wait for it to become healthy again
-	waitForStatus(t, checker, core.StatusPass, 20*time.Second)
+	waitForStatus(t, checker, core.StatusPass)
 
 	status = checker.Status()
 	require.Equal(t, core.StatusPass, status.Status)
@@ -164,7 +167,7 @@ func TestSolaceChecker_Integration_Close(t *testing.T) {
 	checker := NewSolaceChecker(desc, checkInterval, operationsTimeout, connectionString)
 
 	// Wait for it to become healthy first
-	waitForStatus(t, checker, core.StatusPass, 20*time.Second)
+	waitForStatus(t, checker, core.StatusPass)
 
 	// Close the checker
 	require.NoError(t, checker.Close())
@@ -206,7 +209,7 @@ func TestSolaceChecker_Integration_ChangeStatus(t *testing.T) {
 	}()
 
 	// Wait for it to become healthy first
-	waitForStatus(t, checker, core.StatusPass, 20*time.Second)
+	waitForStatus(t, checker, core.StatusPass)
 
 	// Manually change status to Warn
 	manualWarnStatus := core.ComponentStatus{Status: core.StatusWarn, Output: "Manual override to Warn"}
@@ -224,7 +227,7 @@ func TestSolaceChecker_Integration_ChangeStatus(t *testing.T) {
 	}
 
 	// The periodic check should eventually revert it to Pass
-	waitForStatus(t, checker, core.StatusPass, 5*time.Second)
+	waitForStatus(t, checker, core.StatusPass)
 
 	status = checker.Status()
 	require.Equal(t, core.StatusPass, status.Status)
@@ -291,7 +294,7 @@ func TestSolaceChecker_QuitChannelStopsLoop(t *testing.T) {
 	// Do not defer checker.Close() here, as we want to manually close the quit channel.
 
 	// Wait for it to become healthy first
-	waitForStatus(t, checker, core.StatusPass, 20*time.Second)
+	waitForStatus(t, checker, core.StatusPass)
 
 	// Manually close the quit channel to stop the loop
 	close(checker.(*solaceChecker).quit)
@@ -367,9 +370,8 @@ func TestNewSolaceChecker_OpenError(t *testing.T) {
 // TestSolaceChecker_PerformHealthCheck_SessionError tests performHealthCheck when session creation fails.
 func TestSolaceChecker_PerformHealthCheck_SessionError(t *testing.T) {
 	mockConn := &mockSolaceConnection{}
-	mockConn.newSessionFunc = func(ctx context.Context, opts *amqp.SessionOptions) (solaceSession, error) {
-		return nil, fmt.Errorf("mock session creation error")
-	}
+	mockConn.On("NewSession", mock.Anything, mock.Anything).Return(&mockSolaceSession{}, fmt.Errorf("mock session creation error"))
+	mockConn.On("Close").Return(nil)
 
 	desc := core.Descriptor{ComponentID: "solace-perform-session-error", ComponentType: "solace"}
 	checkInterval := 50 * time.Millisecond
@@ -395,14 +397,12 @@ func TestSolaceChecker_PerformHealthCheck_SessionError(t *testing.T) {
 // TestSolaceChecker_PerformHealthCheck_SenderError tests performHealthCheck when sender creation fails.
 func TestSolaceChecker_PerformHealthCheck_SenderError(t *testing.T) {
 	mockSession := &mockSolaceSession{}
-	mockSession.newSenderFunc = func(ctx context.Context, target string, opts *amqp.SenderOptions) (solaceSender, error) {
-		return nil, fmt.Errorf("mock sender creation error")
-	}
+	mockSession.On("NewSender", mock.Anything, mock.Anything, mock.Anything).Return(&mockSolaceSender{}, fmt.Errorf("mock sender creation error"))
+	mockSession.On("Close").Return(nil)
 
 	mockConn := &mockSolaceConnection{}
-	mockConn.newSessionFunc = func(ctx context.Context, opts *amqp.SessionOptions) (solaceSession, error) {
-		return mockSession, nil
-	}
+	mockConn.On("NewSession", mock.Anything, mock.Anything).Return(mockSession, nil)
+	mockConn.On("Close").Return(nil)
 
 	desc := core.Descriptor{ComponentID: "solace-perform-sender-error", ComponentType: "solace"}
 	checkInterval := 50 * time.Millisecond
@@ -426,17 +426,15 @@ func TestSolaceChecker_PerformHealthCheck_SenderError(t *testing.T) {
 // TestSolaceChecker_PerformHealthCheck_ReceiverError tests performHealthCheck when receiver creation fails.
 func TestSolaceChecker_PerformHealthCheck_ReceiverError(t *testing.T) {
 	mockSession := &mockSolaceSession{}
-	mockSession.newSenderFunc = func(ctx context.Context, target string, opts *amqp.SenderOptions) (solaceSender, error) {
-		return newMockSolaceSender(), nil
-	}
-	mockSession.newReceiverFunc = func(ctx context.Context, source string, opts *amqp.ReceiverOptions) (solaceReceiver, error) {
-		return nil, fmt.Errorf("mock receiver creation error")
-	}
+	mockSender := newMockSolaceSender()
+	mockSender.On("Close").Return(nil)
+	mockSession.On("NewSender", mock.Anything, mock.Anything, mock.Anything).Return(mockSender, nil)
+	mockSession.On("NewReceiver", mock.Anything, mock.Anything, mock.Anything).Return(&mockSolaceReceiver{}, fmt.Errorf("mock receiver creation error"))
+	mockSession.On("Close").Return(nil)
 
 	mockConn := &mockSolaceConnection{}
-	mockConn.newSessionFunc = func(ctx context.Context, opts *amqp.SessionOptions) (solaceSession, error) {
-		return mockSession, nil
-	}
+	mockConn.On("NewSession", mock.Anything, mock.Anything).Return(mockSession, nil)
+	mockConn.On("Close").Return(nil)
 
 	desc := core.Descriptor{ComponentID: "solace-perform-receiver-error", ComponentType: "solace"}
 	checkInterval := 50 * time.Millisecond
@@ -460,22 +458,19 @@ func TestSolaceChecker_PerformHealthCheck_ReceiverError(t *testing.T) {
 // TestSolaceChecker_PerformHealthCheck_SendError tests performHealthCheck when sending a message fails.
 func TestSolaceChecker_PerformHealthCheck_SendError(t *testing.T) {
 	mockSender := &mockSolaceSender{}
-	mockSender.sendFunc = func(ctx context.Context, msg *amqp.Message, opts *amqp.SendOptions) error {
-		return fmt.Errorf("mock send error")
-	}
+	mockSender.On("Send", mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("mock send error"))
+	mockSender.On("Close").Return(nil)
 
 	mockSession := &mockSolaceSession{}
-	mockSession.newSenderFunc = func(ctx context.Context, target string, opts *amqp.SenderOptions) (solaceSender, error) {
-		return mockSender, nil
-	}
-	mockSession.newReceiverFunc = func(ctx context.Context, source string, opts *amqp.ReceiverOptions) (solaceReceiver, error) {
-		return newMockSolaceReceiver(), nil
-	}
+	mockSession.On("NewSender", mock.Anything, mock.Anything, mock.Anything).Return(mockSender, nil)
+	mockReceiver := newMockSolaceReceiver()
+	mockReceiver.On("Close").Return(nil)
+	mockSession.On("NewReceiver", mock.Anything, mock.Anything, mock.Anything).Return(mockReceiver, nil)
+	mockSession.On("Close").Return(nil)
 
 	mockConn := &mockSolaceConnection{}
-	mockConn.newSessionFunc = func(ctx context.Context, opts *amqp.SessionOptions) (solaceSession, error) {
-		return mockSession, nil
-	}
+	mockConn.On("NewSession", mock.Anything, mock.Anything).Return(mockSession, nil)
+	mockConn.On("Close").Return(nil)
 
 	desc := core.Descriptor{ComponentID: "solace-perform-send-error", ComponentType: "solace"}
 	checkInterval := 50 * time.Millisecond
@@ -499,27 +494,21 @@ func TestSolaceChecker_PerformHealthCheck_SendError(t *testing.T) {
 // TestSolaceChecker_PerformHealthCheck_ReceiveError tests performHealthCheck when receiving a message fails.
 func TestSolaceChecker_PerformHealthCheck_ReceiveError(t *testing.T) {
 	mockReceiver := &mockSolaceReceiver{}
-	mockReceiver.receiveFunc = func(ctx context.Context, opts *amqp.ReceiveOptions) (*amqp.Message, error) {
-		return nil, fmt.Errorf("mock receive error")
-	}
+	mockReceiver.On("Receive", mock.Anything, mock.Anything).Return(amqp.NewMessage([]byte("mock")), fmt.Errorf("mock receive error"))
+	mockReceiver.On("Close").Return(nil)
 
 	mockSender := &mockSolaceSender{}
-	mockSender.sendFunc = func(ctx context.Context, msg *amqp.Message, opts *amqp.SendOptions) error {
-		return nil // Send successfully
-	}
+	mockSender.On("Send", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	mockSender.On("Close").Return(nil)
 
 	mockSession := &mockSolaceSession{}
-	mockSession.newSenderFunc = func(ctx context.Context, target string, opts *amqp.SenderOptions) (solaceSender, error) {
-		return mockSender, nil
-	}
-	mockSession.newReceiverFunc = func(ctx context.Context, source string, opts *amqp.ReceiverOptions) (solaceReceiver, error) {
-		return mockReceiver, nil
-	}
+	mockSession.On("NewSender", mock.Anything, mock.Anything, mock.Anything).Return(mockSender, nil)
+	mockSession.On("NewReceiver", mock.Anything, mock.Anything, mock.Anything).Return(mockReceiver, nil)
+	mockSession.On("Close").Return(nil)
 
 	mockConn := &mockSolaceConnection{}
-	mockConn.newSessionFunc = func(ctx context.Context, opts *amqp.SessionOptions) (solaceSession, error) {
-		return mockSession, nil
-	}
+	mockConn.On("NewSession", mock.Anything, mock.Anything).Return(mockSession, nil)
+	mockConn.On("Close").Return(nil)
 
 	desc := core.Descriptor{ComponentID: "solace-perform-receive-error", ComponentType: "solace"}
 	checkInterval := 50 * time.Millisecond

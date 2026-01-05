@@ -1,0 +1,164 @@
+package solace
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"healthcheck/core"
+
+	"github.com/Azure/go-amqp"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
+)
+
+// Mocks for solaceConnection, solaceSession, solaceSender, solaceReceiver
+
+type mockSolaceConnection struct {
+	mock.Mock
+	newSessionFunc func(ctx context.Context, opts *amqp.SessionOptions) (solaceSession, error)
+}
+
+func (m *mockSolaceConnection) NewSession(ctx context.Context, opts *amqp.SessionOptions) (solaceSession, error) {
+	args := m.Called(ctx, opts)
+	if m.newSessionFunc != nil {
+		return m.newSessionFunc(ctx, opts)
+	}
+	return args.Get(0).(solaceSession), args.Error(1)
+}
+func (m *mockSolaceConnection) Close() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func newMockSolaceConnection() *mockSolaceConnection {
+	return &mockSolaceConnection{}
+}
+
+type mockSolaceSession struct {
+	mock.Mock
+	newSenderFunc   func(ctx context.Context, target string, opts *amqp.SenderOptions) (solaceSender, error)
+	newReceiverFunc func(ctx context.Context, source string, opts *amqp.ReceiverOptions) (solaceReceiver, error)
+}
+
+func (m *mockSolaceSession) NewSender(ctx context.Context, target string, opts *amqp.SenderOptions) (solaceSender, error) {
+	args := m.Called(ctx, target, opts)
+	if m.newSenderFunc != nil {
+		return m.newSenderFunc(ctx, target, opts)
+	}
+	return args.Get(0).(solaceSender), args.Error(1)
+}
+func (m *mockSolaceSession) NewReceiver(ctx context.Context, source string, opts *amqp.ReceiverOptions) (solaceReceiver, error) {
+	args := m.Called(ctx, source, opts)
+	if m.newReceiverFunc != nil {
+		return m.newReceiverFunc(ctx, source, opts)
+	}
+	return args.Get(0).(solaceReceiver), args.Error(1)
+}
+func (m *mockSolaceSession) Close() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func newMockSolaceSession() *mockSolaceSession {
+	return &mockSolaceSession{}
+}
+
+type mockSolaceSender struct {
+	mock.Mock
+	sendFunc func(ctx context.Context, msg *amqp.Message, opts *amqp.SendOptions) error
+}
+
+func (m *mockSolaceSender) Send(ctx context.Context, msg *amqp.Message, opts *amqp.SendOptions) error {
+	args := m.Called(ctx, msg, opts)
+	if m.sendFunc != nil {
+		return m.sendFunc(ctx, msg, opts)
+	}
+	return args.Error(0)
+}
+func (m *mockSolaceSender) Close() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func newMockSolaceSender() *mockSolaceSender {
+	return &mockSolaceSender{}
+}
+
+type mockSolaceReceiver struct {
+	mock.Mock
+	receiveFunc       func(ctx context.Context, opts *amqp.ReceiveOptions) (*amqp.Message, error)
+	acceptMessageFunc func(ctx context.Context, msg *amqp.Message) error
+}
+
+func (m *mockSolaceReceiver) Receive(ctx context.Context, opts *amqp.ReceiveOptions) (*amqp.Message, error) {
+	args := m.Called(ctx, opts)
+	if m.receiveFunc != nil {
+		return m.receiveFunc(ctx, opts)
+	}
+	return args.Get(0).(*amqp.Message), args.Error(1)
+}
+func (m *mockSolaceReceiver) AcceptMessage(ctx context.Context, msg *amqp.Message) error {
+	args := m.Called(ctx, msg)
+	if m.acceptMessageFunc != nil {
+		return m.acceptMessageFunc(ctx, msg)
+	}
+	return args.Error(0)
+}
+func (m *mockSolaceReceiver) Close() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func newMockSolaceReceiver() *mockSolaceReceiver {
+	return &mockSolaceReceiver{}
+}
+
+func setupSolaceContainer(t require.TestingT, ctx context.Context) (testcontainers.Container, string, func()) {
+	// Define environment variables for the Solace container
+	env := map[string]string{
+		"username_admin_globalaccesslevel": "admin",
+		"username_admin_password":          "admin",
+		"system_scaling_tier":              "1",
+		"system_scaling_max_connections":   "100",
+	}
+
+	// Create a new container request
+	req := testcontainers.ContainerRequest{
+		Image:        "solace/solace-pubsub-standard:latest",
+		Hostname:     "solace",
+		Env:          env,
+		ExposedPorts: []string{"5672/tcp", "8080/tcp", "55555/tcp"}, // Expose ports for AMQP, SEMP, and CLI
+		WaitingFor:   wait.ForLog("Solace PubSub+ event broker is ready for message routing").WithStartupTimeout(2 * time.Minute),
+	}
+
+	// Create the container
+	solaceContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	require.NoError(t, err)
+
+	// Get the container's mapped port for the AMQP port
+	amqpPort, err := solaceContainer.MappedPort(ctx, "5672/tcp")
+	require.NoError(t, err)
+
+	host, err := solaceContainer.Host(ctx)
+	require.NoError(t, err)
+
+	connectionString := fmt.Sprintf("amqp://%s:%s", host, amqpPort.Port())
+
+	cleanup := func() {
+		require.NoError(t, solaceContainer.Terminate(ctx))
+	}
+
+	return solaceContainer, connectionString, cleanup
+}
+
+func waitForStatus(t require.TestingT, checker core.Component, expectedStatus core.StatusEnum) {
+	require.Eventually(t, func() bool {
+		return checker.Status().Status == expectedStatus
+	}, 10*time.Second, 1*time.Second)
+}
