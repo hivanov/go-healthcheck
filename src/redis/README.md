@@ -72,6 +72,13 @@ This constructor allows you to inject a custom `OpenRedisFunc`, which is useful 
 
 ```go
 // Example usage with a mocked Redis client
+import (
+	"context"
+	"time" // Added for time.Second
+	redis "github.com/redis/go-redis/v9"
+	"github.com/hivanov/go-healthcheck/src/core" // Added for descriptor
+	"github.com/hivanov/go-healthcheck/src/redis" // Added for NewRedisCheckerWithOpenRedisFunc
+)
 type mockRedisClient struct {
 	// Implement redis.Cmdable methods
 }

@@ -42,14 +42,13 @@ func main() {
 	descriptor := core.Descriptor{
 		ComponentID:   "my-mongodb-instance",
 		ComponentType: "mongodb",
-		ComponentName: "Production MongoDB",
 	}
 
 	// MongoDB connection string (replace with your actual connection details)
 	connectionString := "mongodb://localhost:27017" // Example for Testcontainers setup
 
 	// Create a new MongoDB health checker with a check interval of 5 seconds
-	checker := mongodb.NewMongoChecker(descriptor, 5*time.Second, connectionString)
+	checker := mongodb.NewMongoChecker(descriptor, 5*time.Second, 2*time.Second, connectionString)
 
 	// Ensure the checker is gracefully closed when the application exits
 	defer func() {

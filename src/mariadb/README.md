@@ -22,7 +22,6 @@ func main() {
 	descriptor := core.Descriptor{
 		ComponentID:   "my-mariadb-instance",
 		ComponentType: "mariadb",
-		ComponentName: "Production MariaDB",
 	}
 
 	// MariaDB connection string (replace with your actual connection details)

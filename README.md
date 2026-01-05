@@ -93,20 +93,12 @@ func main() {
 		}
 	}()
 
-	// 3. Expose the health check endpoint.
-	// The core library doesn't provide a handler out-of-the-box, so you must create one
-	// that calls service.Health() and marshals the result to JSON.
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		healthStatus := service.Health()
-		w.Header().Set("Content-Type", "application/health+json")
-		if err := json.NewEncoder(w).Encode(healthStatus); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, `{"status": "fail", "output": "error encoding health status: %v"}`, err)
-		}
-	})
+	// 3. Expose the health check endpoint using the built-in HTTP handler.
+	// This registers liveness (/.well-known/live) and readiness (/.well-known/ready) probes.
+	healthHandler := core.NewHTTPHandler(service)
 
-	fmt.Println("Health check server listening on :8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	fmt.Println("Health check server listening on :8080. Probes available at /.well-known/live and /.well-known/ready")
+	if err := http.ListenAndServe(":8080", healthHandler); err != nil {
 		log.Fatalf("HTTP server failed: %v", err)
 	}
 }
