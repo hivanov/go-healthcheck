@@ -228,7 +228,7 @@ func TestNewHTTPHandler_Readiness(t *testing.T) {
 			handler.ServeHTTP(rr, req)
 
 			assert.Equal(t, tt.expectedHTTPCode, rr.Code, "Expected HTTP status code mismatch")
-			assert.Equal(t, "application/json", rr.Header().Get("Content-Type"), "Expected Content-Type header mismatch")
+			assert.Equal(t, "application/health+json", rr.Header().Get("Content-Type"), "Expected Content-Type header mismatch")
 
 			var actualHealth Health
 			err := json.Unmarshal(rr.Body.Bytes(), &actualHealth)
@@ -292,7 +292,7 @@ func TestNewHTTPHandler_Readiness_Headers(t *testing.T) {
 
 	handler.ServeHTTP(rr, req)
 
-	assert.Equal(t, "application/json", rr.Header().Get("Content-Type"))
+	assert.Equal(t, "application/health+json", rr.Header().Get("Content-Type"))
 	assert.Equal(t, "no-cache, no-store, must-revalidate", rr.Header().Get("Cache-Control"))
 	assert.Equal(t, "no-cache", rr.Header().Get("Pragma"))
 	assert.Equal(t, "0", rr.Header().Get("Expires"))
@@ -431,7 +431,7 @@ func FuzzHTTPHandler(f *testing.F) {
 			assert.Equal(t, http.StatusOK, rr.Code)
 			assert.Empty(t, rr.Body.String())
 		} else if path == "/.well-known/ready" {
-			assert.Contains(t, rr.Header().Get("Content-Type"), "application/json")
+			assert.Contains(t, rr.Header().Get("Content-Type"), "application/health+json")
 			var h Health
 			err := json.Unmarshal(rr.Body.Bytes(), &h)
 			assert.NoError(t, err)
